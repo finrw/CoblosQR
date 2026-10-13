@@ -1,0 +1,178 @@
+/* =========================================================
+   STYLE BERSAMA - PENCOBLOSAN & REKAP
+   ========================================================= */
+:root {
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --brand: #1d4ed8;
+  --brand-dark: #1e3a8a;
+  --ok: #15803d;
+  --ok-bg: #dcfce7;
+  --err: #b91c1c;
+  --err-bg: #fee2e2;
+  --info: #1e40af;
+  --info-bg: #dbeafe;
+  --radius: 16px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- Header ---------- */
+.topbar {
+  background: var(--brand-dark);
+  color: #fff;
+  padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  text-align: center;
+}
+.topbar h1 { margin: 0; font-size: 1.15rem; letter-spacing: .02em; }
+.topbar small { display: block; opacity: .8; margin-top: 2px; font-size: .8rem; }
+
+main { max-width: 760px; margin: 0 auto; padding: 16px; }
+h2 { margin: 4px 0 14px; font-size: 1.3rem; text-align: center; }
+
+/* ---------- Tombol ---------- */
+.btn {
+  appearance: none; border: 0; cursor: pointer;
+  font: inherit; font-weight: 700;
+  padding: 16px 22px; border-radius: 14px;
+  min-height: 56px; flex: 1;
+  transition: transform .05s, opacity .2s;
+}
+.btn:active { transform: scale(.98); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--brand); color: #fff; }
+.btn.success { background: var(--ok); color: #fff; }
+.btn.ghost { background: #fff; color: var(--ink); border: 2px solid var(--line); }
+.aksi { display: flex; gap: 12px; margin-top: 18px; }
+
+/* ---------- Scanner ---------- */
+.scan-wrap {
+  position: relative; background: #000; border-radius: var(--radius);
+  overflow: hidden; width: 100%; aspect-ratio: 3 / 4; max-height: 70vh;
+}
+#reader, #readerRekap { width: 100%; height: 100%; border: 0 !important; }
+#reader video, #readerRekap video { width: 100% !important; height: 100% !important; object-fit: cover; }
+.scan-overlay {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 12px; text-align: center; color: #fff; font-weight: 600;
+  background: linear-gradient(transparent, rgba(0,0,0,.65));
+  pointer-events: none;
+}
+
+.status {
+  margin-top: 14px; padding: 14px 16px; border-radius: 12px;
+  font-weight: 600; text-align: center;
+}
+.status.info  { background: var(--info-bg); color: var(--info); }
+.status.error { background: var(--err-bg);  color: var(--err); }
+.status.ok    { background: var(--ok-bg);   color: var(--ok); }
+
+.manual { display: flex; gap: 8px; margin-top: 14px; }
+.manual input, .pin-box input {
+  flex: 1; font: inherit; padding: 14px; border-radius: 12px;
+  border: 2px solid var(--line); background: #fff; text-transform: uppercase;
+  min-width: 0;
+}
+.manual .btn { flex: 0 0 auto; padding: 14px 18px; min-height: 0; }
+.opsi { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--muted); font-size: .95rem; }
+.opsi input { width: 20px; height: 20px; }
+
+/* ---------- Kandidat ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.kartu {
+  background: var(--card); border: 3px solid transparent; border-radius: var(--radius);
+  padding: 16px; text-align: center; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  transition: border-color .15s, transform .05s;
+}
+.kartu:active { transform: scale(.98); }
+.kartu.aktif { border-color: var(--brand); background: #eff6ff; }
+.kartu .no {
+  display: inline-grid; place-items: center; width: 64px; height: 64px;
+  border-radius: 50%; background: var(--brand); color: #fff;
+  font-size: 2rem; font-weight: 800; margin-bottom: 10px;
+}
+.kartu img { display: block; width: 100%; max-height: 220px; object-fit: cover; border-radius: 12px; margin-bottom: 10px; }
+.kartu .nama { font-size: 1.15rem; font-weight: 700; }
+
+/* ---------- Modal konfirmasi ---------- */
+.modal {
+  position: fixed; inset: 0; background: rgba(15,23,42,.65);
+  display: grid; place-items: center; padding: 20px; z-index: 50;
+}
+.modal-box { background: #fff; border-radius: 20px; padding: 24px; width: 100%; max-width: 420px; text-align: center; }
+.modal-box h3 { margin: 0 0 8px; font-size: 1.25rem; }
+.modal-box .besar { font-size: 3rem; font-weight: 800; color: var(--brand); line-height: 1.1; }
+.modal-box .nama-k { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+.modal-box p { color: var(--muted); margin: 8px 0 0; }
+
+/* ---------- Resi ---------- */
+.resi {
+  background: #fff; border-radius: var(--radius); padding: 20px 16px;
+  max-width: 320px; margin: 0 auto; text-align: center;
+  box-shadow: 0 1px 6px rgba(0,0,0,.12);
+  font-family: "Courier New", ui-monospace, monospace; color: #000;
+}
+.resi-judul { font-weight: 800; font-size: 1.05rem; }
+.resi-sub { font-size: .85rem; letter-spacing: .2em; margin: 4px 0 12px; }
+.resi img { width: 210px; height: 210px; image-rendering: pixelated; display: block; margin: 0 auto; }
+.resi-kode { font-size: 1.4rem; font-weight: 800; letter-spacing: .15em; margin-top: 10px; }
+.resi-ket { font-size: .75rem; margin-top: 10px; line-height: 1.35; }
+.countdown { text-align: center; color: var(--muted); margin: 12px 0 0; }
+
+/* ---------- Rekap ---------- */
+.pin-box { background: var(--card); padding: 22px; border-radius: var(--radius); text-align: center; max-width: 380px; margin: 30px auto; }
+.pin-box input { width: 100%; text-align: center; letter-spacing: .3em; margin: 14px 0; text-transform: none; }
+.flash { margin: 14px 0; padding: 18px; border-radius: 14px; font-size: 1.15rem; font-weight: 800; text-align: center; }
+.flash.ok { background: var(--ok-bg); color: var(--ok); }
+.flash.err { background: var(--err-bg); color: var(--err); }
+.flash.idle { background: #e2e8f0; color: var(--muted); }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0; }
+.stat { background: var(--card); border-radius: 12px; padding: 12px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.stat b { display: block; font-size: 1.7rem; }
+.stat span { color: var(--muted); font-size: .85rem; }
+.hasil { background: var(--card); border-radius: var(--radius); padding: 14px; margin-top: 14px; }
+.hasil h3 { margin: 0 0 10px; }
+.baris-hasil { margin: 12px 0; }
+.baris-hasil .atas { display: flex; justify-content: space-between; font-weight: 700; gap: 10px; }
+.bar { height: 14px; background: var(--line); border-radius: 8px; overflow: hidden; margin-top: 6px; }
+.bar > i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .4s; }
+
+@media (min-width: 700px) {
+  .scan-wrap { aspect-ratio: 4 / 3; }
+  .stat-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* =========================================================
+   CETAK THERMAL 80 mm  (hanya blok resi yang dicetak)
+   ========================================================= */
+@media print {
+  @page { size: 80mm auto; margin: 0; }
+  html, body { background: #fff !important; width: 80mm; margin: 0; padding: 0; min-height: 0; }
+  .topbar, .no-print, .modal, .screen:not(#screen-resi) { display: none !important; }
+  main { padding: 0; max-width: none; }
+  #screen-resi { display: block !important; }
+  .resi {
+    box-shadow: none; border-radius: 0; max-width: none;
+    width: 72mm; margin: 0 auto; padding: 4mm 0 8mm;
+  }
+  .resi img { width: 52mm; height: 52mm; }
+  .resi-judul { font-size: 14pt; }
+  .resi-kode { font-size: 15pt; }
+  .resi-ket { font-size: 8pt; }
+}
+
