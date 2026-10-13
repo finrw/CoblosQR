@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title></title>
+  <title>Scan QR</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="topbar no-print">
-  <h1 id="judul">Pencoblosan</h1>
+  <h1 id="judul">SCAN QR</h1>
   <small>Scan QR undangan untuk mulai memilih</small>
 </header>
 
@@ -22,6 +22,11 @@
       <div class="scan-overlay">Arahkan QR undangan ke kamera</div>
     </div>
     <div id="status" class="status" hidden></div>
+
+    <div class="manual no-print" id="manual" hidden>
+      <input id="tokenManual" placeholder="Atau ketik token (mode uji)" autocomplete="off" autocapitalize="characters">
+      <button id="btnManual" class="btn primary">Masuk</button>
+    </div>
 
     <label class="opsi no-print">
       <input type="checkbox" id="autoCetak">
@@ -111,6 +116,7 @@
   $('judul').textContent = C.JUDUL;
   $('rJudul').textContent = C.JUDUL.toUpperCase();
   $('rKet').textContent = C.KETERANGAN_RESI;
+  $('manual').hidden = !C.TAMPIL_INPUT_MANUAL;   // true = tampil, false = sembunyi
 
   $('autoCetak').checked = localStorage.getItem('autoCetak') === '1';
   $('autoCetak').addEventListener('change', function () {
@@ -176,6 +182,17 @@
     if (!scanning) return Promise.resolve();
     return scanner.stop().catch(function () {}).then(function () { scanning = false; });
   }
+
+  /* ---------- input token manual (opsional, lihat config.js) ---------- */
+  $('btnManual').addEventListener('click', function () {
+    if (!C.TAMPIL_INPUT_MANUAL) return;
+    var t = ambilToken($('tokenManual').value);
+    $('tokenManual').value = '';
+    prosesToken(t);
+  });
+  $('tokenManual').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('btnManual').click();
+  });
 
   /* ---------- proses token ---------- */
   function prosesToken(t) {
@@ -329,3 +346,4 @@
 </script>
 </body>
 </html>
+
