@@ -13,6 +13,11 @@ window.APP_CONFIG = {
   KETERANGAN_RESI: "Masukkan resi ke kotak suara. Jangan difoto atau dibagikan.",
 
   // Setelah resi tampil, otomatis kembali ke scanner (detik). 0 = tidak otomatis.
-  AUTO_KEMBALI_DETIK: 45
+  AUTO_KEMBALI_DETIK: 45,
+
+  // Kolom ketik token manual di halaman scan.
+  // true  = tampil (untuk masa uji / kamera bermasalah)
+  // false = disembunyikan
+  TAMPIL_INPUT_MANUAL: true
 };
 
