@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Scan QR</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+
+<header class="topbar no-print">
+  <h1 id="judul">SCAN QR</h1>
+  <small>Scan QR undangan untuk mulai memilih</small>
+</header>
+
+<main>
+
+  <!-- 1. SCAN TOKEN -->
+  <section id="screen-scan" class="screen">
+    <div class="scan-wrap">
+      <div id="reader"></div>
+      <div class="scan-overlay">Arahkan QR undangan ke kamera</div>
+    </div>
+    <div id="status" class="status" hidden></div>
+
+    <div class="manual no-print" id="manual" hidden>
+      <input id="tokenManual" placeholder="Atau ketik token (mode uji)" autocomplete="off" autocapitalize="characters">
+      <button id="btnManual" class="btn primary">Masuk</button>
+    </div>
+
+    <label class="opsi no-print">
+      <input type="checkbox" id="autoCetak">
+      Cetak resi otomatis ke printer thermal 80 mm
+    </label>
+  </section>
+
+  <!-- 2. PILIH KANDIDAT -->
+  <section id="screen-pilih" class="screen" hidden>
+    <h2>Pilih Satu Kandidat</h2>
+    <div id="daftar" class="grid"></div>
+    <div class="aksi">
+      <button id="btnBatal" class="btn ghost">Batal</button>
+      <button id="btnLanjut" class="btn primary" disabled>Pilih</button>
+    </div>
+  </section>
+
+  <!-- 3. RESI -->
+  <section id="screen-resi" class="screen" hidden>
+    <h2 class="no-print">Suara Anda Tersimpan</h2>
+    <div id="resi-cetak" class="resi">
+      <div class="resi-judul" id="rJudul"></div>
+      <div class="resi-sub">RESI SUARA</div>
+      <img id="rQr" alt="QR resi">
+      <div class="resi-kode" id="rKode"></div>
+      <div class="resi-ket" id="rKet"></div>
+    </div>
+    <div class="aksi no-print">
+      <button id="btnCetak" class="btn primary">Cetak Resi</button>
+      <button id="btnSelesai" class="btn success">Selesai</button>
+    </div>
+    <p class="countdown no-print" id="cd"></p>
+  </section>
+
+</main>
+
+<!-- Modal konfirmasi pilihan -->
+<div id="konfirm" class="modal no-print" hidden>
+  <div class="modal-box">
+    <h3>Konfirmasi Pilihan Anda</h3>
+    <div class="besar" id="kNo"></div>
+    <div class="nama-k" id="kNama"></div>
+    <p>Pilihan tidak dapat diubah setelah dikirim.</p>
+    <div class="aksi">
+      <button id="btnKembali" class="btn ghost">Kembali</button>
+      <button id="btnYakin" class="btn success">Ya, Kirim</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal pesan fatal (mis. koneksi putus saat kirim) -->
+<div id="fatal" class="modal no-print" hidden>
+  <div class="modal-box">
+    <h3 id="fatalJudul">Perhatian</h3>
+    <p id="fatalIsi"></p>
+    <div class="aksi"><button id="btnFatalOk" class="btn primary">Kembali ke Awal</button></div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var C = window.APP_CONFIG;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var scanner = null, scanning = false;
+  var busy = false;              // sedang memproses satu token
+  var sending = false;           // sedang mengirim suara
+  var token = null, kandidat = [], pilihan = null;
+  var cdTimer = null;
+
+  var PESAN = {
+    TOKEN_KOSONG: 'Token kosong.',
+    TOKEN_TIDAK_DITEMUKAN: 'Token tidak ditemukan. Hubungi panitia.',
+    SUDAH_MEMILIH: 'Token ini sudah digunakan untuk memilih.',
+    SERVER_SIBUK: 'Server sedang sibuk. Coba scan ulang.',
+    KANDIDAT_TIDAK_VALID: 'Kandidat tidak valid. Hubungi panitia.',
+    KOLOM_TIDAK_LENGKAP: 'Data pemilih belum lengkap. Hubungi panitia.',
+    GAGAL_SIMPAN: 'Suara gagal disimpan. Silakan scan ulang atau hubungi panitia.'
+  };
+
+  document.title = C.JUDUL;
+  $('judul').textContent = C.JUDUL;
+  $('rJudul').textContent = C.JUDUL.toUpperCase();
+  $('rKet').textContent = C.KETERANGAN_RESI;
+  $('manual').hidden = !C.TAMPIL_INPUT_MANUAL;   // true = tampil, false = sembunyi
+
+  $('autoCetak').checked = localStorage.getItem('autoCetak') === '1';
+  $('autoCetak').addEventListener('change', function () {
+    localStorage.setItem('autoCetak', this.checked ? '1' : '0');
+  });
+
+  /* ---------- util ---------- */
+  function show(nama) {
+    ['scan', 'pilih', 'resi'].forEach(function (n) {
+      $('screen-' + n).hidden = (n !== nama);
+    });
+    window.scrollTo(0, 0);
+  }
+
+  function setStatus(teks, jenis) {
+    var el = $('status');
+    if (!teks) { el.hidden = true; return; }
+    el.textContent = teks;
+    el.className = 'status ' + (jenis || 'info');
+    el.hidden = false;
+  }
+
+  function api(payload) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 30000);
+    // text/plain agar tidak memicu preflight CORS pada Apps Script
+    return fetch(C.API_URL, { method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .finally(function () { clearTimeout(t); });
+  }
+
+  function ambilToken(teks) {
+    teks = String(teks || '').trim();
+    var m = teks.match(/[?&]token=([^&\s]+)/i);   // jika QR berisi URL ...?token=XXXX
+    return (m ? decodeURIComponent(m[1]) : teks).toUpperCase();
+  }
+
+  /* ---------- scanner ---------- */
+  function mulaiScan() {
+    token = null; pilihan = null; kandidat = []; busy = false;
+    show('scan');
+    if (!scanner) scanner = new Html5Qrcode('reader');
+    if (scanning) return;
+    scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 10,
+        qrbox: function (w, h) { var s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; }
+      },
+      function (teks) { prosesToken(ambilToken(teks)); },
+      function () { /* abaikan error frame */ }
+    ).then(function () {
+      scanning = true;
+    }).catch(function () {
+      setStatus('Kamera tidak bisa dibuka. Izinkan akses kamera di browser, lalu muat ulang halaman.', 'error');
+    });
+  }
+
+  function hentikanScan() {
+    if (!scanning) return Promise.resolve();
+    return scanner.stop().catch(function () {}).then(function () { scanning = false; });
+  }
+
+  /* ---------- input token manual (opsional, lihat config.js) ---------- */
+  $('btnManual').addEventListener('click', function () {
+    if (!C.TAMPIL_INPUT_MANUAL) return;
+    var t = ambilToken($('tokenManual').value);
+    $('tokenManual').value = '';
+    prosesToken(t);
+  });
+  $('tokenManual').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('btnManual').click();
+  });
+
+  /* ---------- proses token ---------- */
+  function prosesToken(t) {
+    if (busy || !t) return;
+    busy = true;
+    hentikanScan().then(function () {
+      setStatus('Memeriksa token…', 'info');
+      return api({ action: 'cekToken', token: t });
+    }).then(function (r) {
+      if (!r.ok) { gagal(PESAN[r.error] || ('Gagal: ' + r.error)); return; }
+      token = t;
+      kandidat = r.kandidat || [];
+      if (!kandidat.length) { gagal('Daftar kandidat kosong. Hubungi panitia.'); return; }
+      setStatus('');
+      tampilKandidat();
+    }).catch(function () {
+      gagal('Tidak bisa terhubung ke server. Periksa internet lalu scan ulang.');
+    });
+  }
+
+  function gagal(pesan) {
+    show('scan');
+    setStatus(pesan, 'error');
+    setTimeout(function () { setStatus(''); mulaiScan(); }, 3500);
+  }
+
+  /* ---------- pilih kandidat ---------- */
+  function tampilKandidat() {
+    pilihan = null;
+    $('btnLanjut').disabled = true;
+    var box = $('daftar');
+    box.innerHTML = '';
+    kandidat.forEach(function (k) {
+      var el = document.createElement('div');
+      el.className = 'kartu';
+      if (k.foto) {
+        var img = document.createElement('img');
+        img.src = k.foto; img.alt = k.nama;
+        img.onerror = function () { img.remove(); };
+        el.appendChild(img);
+      }
+      var no = document.createElement('div'); no.className = 'no'; no.textContent = k.no;
+      var nm = document.createElement('div'); nm.className = 'nama'; nm.textContent = k.nama;
+      el.appendChild(no); el.appendChild(nm);
+      el.addEventListener('click', function () {
+        pilihan = k;
+        Array.prototype.forEach.call(box.children, function (c) { c.classList.remove('aktif'); });
+        el.classList.add('aktif');
+        $('btnLanjut').disabled = false;
+      });
+      box.appendChild(el);
+    });
+    show('pilih');
+  }
+
+  $('btnBatal').addEventListener('click', mulaiScan);
+
+  $('btnLanjut').addEventListener('click', function () {
+    if (!pilihan) return;
+    $('kNo').textContent = 'No. ' + pilihan.no;
+    $('kNama').textContent = pilihan.nama;
+    $('konfirm').hidden = false;
+  });
+  $('btnKembali').addEventListener('click', function () { $('konfirm').hidden = true; });
+
+  /* ---------- kirim suara ---------- */
+  $('btnYakin').addEventListener('click', function () {
+    if (sending || !pilihan || !token) return;
+    sending = true;
+    $('btnYakin').disabled = true; $('btnKembali').disabled = true;
+    $('btnYakin').textContent = 'Mengirim…';
+
+    api({ action: 'coblos', token: token, noKandidat: pilihan.no })
+      .then(function (r) {
+        $('konfirm').hidden = true;
+        if (!r.ok) {
+          fatal('Suara tidak tersimpan', (PESAN[r.error] || r.error) + ' Hubungi panitia bila perlu.');
+          return;
+        }
+        tampilResi(r.kode);
+      })
+      .catch(function () {
+        $('konfirm').hidden = true;
+        fatal('Koneksi terputus saat mengirim',
+          'Suara MUNGKIN sudah tersimpan. Jangan mencoblos ulang. Segera lapor ke panitia agar dicek.');
+      })
+      .finally(function () {
+        sending = false;
+        $('btnYakin').disabled = false; $('btnKembali').disabled = false;
+        $('btnYakin').textContent = 'Ya, Kirim';
+      });
+  });
+
+  function fatal(judul, isi) {
+    $('fatalJudul').textContent = judul;
+    $('fatalIsi').textContent = isi;
+    $('fatal').hidden = false;
+  }
+  $('btnFatalOk').addEventListener('click', function () { $('fatal').hidden = true; mulaiScan(); });
+
+  /* ---------- resi ---------- */
+  function tampilResi(kode) {
+    // hapus semua jejak pilihan dari memori halaman
+    token = null; pilihan = null; kandidat = [];
+    $('daftar').innerHTML = '';
+
+    var qr = qrcode(0, 'M');
+    qr.addData(kode);
+    qr.make();
+    $('rQr').src = qr.createDataURL(8, 2);
+    $('rKode').textContent = kode;
+    show('resi');
+
+    if ($('autoCetak').checked) {
+      setTimeout(function () { window.print(); }, 400);
+    }
+    mulaiHitungMundur();
+  }
+
+  function mulaiHitungMundur() {
+    clearInterval(cdTimer);
+    var sisa = Number(C.AUTO_KEMBALI_DETIK) || 0;
+    if (!sisa) { $('cd').textContent = ''; return; }
+    var upd = function () { $('cd').textContent = 'Kembali otomatis dalam ' + sisa + ' detik'; };
+    upd();
+    cdTimer = setInterval(function () {
+      sisa--;
+      if (sisa <= 0) { selesai(); } else { upd(); }
+    }, 1000);
+  }
+
+  function selesai() {
+    clearInterval(cdTimer);
+    $('rQr').removeAttribute('src');
+    $('rKode').textContent = '';
+    mulaiScan();
+  }
+
+  $('btnCetak').addEventListener('click', function () { window.print(); });
+  $('btnSelesai').addEventListener('click', selesai);
+  window.addEventListener('afterprint', function () {
+    if (!$('screen-resi').hidden && $('autoCetak').checked) selesai();
+  });
+
+  /* ---------- mulai ---------- */
+  if (!C.API_URL || C.API_URL.indexOf('GANTI_') === 0) {
+    setStatus('API_URL belum diisi di config.js', 'error');
+  }
+  mulaiScan();
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
+
