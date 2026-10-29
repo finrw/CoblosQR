@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hasil Pemilihan</title>
+  <link rel="manifest" href="manifest-nobar.json">
+  <meta name="theme-color" content="#0b1226">
+  <link rel="apple-touch-icon" href="nobar-192.png">
+  <style>
+    :root {
+      --bg1: #0b1226;
+      --bg2: #14224a;
+      --card: rgba(255,255,255,.07);
+      --ink: #f8fafc;
+      --muted: #94a3b8;
+      --gold: #fbbf24;
+      --bar: #3b82f6;
+      --bar2: #22d3ee;
+      --ok: #4ade80;
+      --gap: 14px;
+      --rh: clamp(84px, 15vh, 140px);
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 700px at 50% -10%, var(--bg2), var(--bg1));
+      min-height: 100dvh;
+      overflow-x: hidden;
+    }
+
+    /* ---------- login PIN ---------- */
+    #login { max-width: 360px; margin: 18vh auto 0; padding: 24px; text-align: center; background: var(--card); border-radius: 20px; }
+    #login h2 { margin: 0 0 6px; }
+    #login p { color: var(--muted); margin: 0 0 14px; }
+    #login input { width: 100%; padding: 14px; font: inherit; text-align: center; letter-spacing: .3em; border-radius: 12px; border: 0; margin-bottom: 12px; }
+    .btn { font: inherit; font-weight: 700; border: 0; border-radius: 12px; padding: 14px 18px; cursor: pointer; background: var(--bar); color: #fff; }
+    #loginErr { color: #fca5a5; margin: 0 0 10px; font-weight: 600; }
+
+    /* ---------- layar utama ---------- */
+    #layar { max-width: 1200px; margin: 0 auto; padding: clamp(14px, 3vw, 36px); }
+    header { text-align: center; margin-bottom: clamp(10px, 2.5vh, 26px); }
+    h1 { margin: 0; font-size: clamp(1.5rem, 4.5vw, 3.4rem); letter-spacing: .02em; }
+    .sub { color: var(--muted); font-size: clamp(.95rem, 1.8vw, 1.4rem); margin-top: 4px; }
+    .live { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .9rem; color: var(--ok); font-weight: 700; }
+    .live i { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); animation: kedip 1.4s infinite; }
+    @keyframes kedip { 50% { opacity: .25; } }
+
+    /* ringkasan */
+    .ringkas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: clamp(10px, 2.5vh, 24px); }
+    .box { background: var(--card); border-radius: 16px; padding: 10px 8px; text-align: center; }
+    .box b { display: block; font-size: clamp(1.4rem, 4vw, 3rem); line-height: 1.1; }
+    .box span { color: var(--muted); font-size: clamp(.7rem, 1.5vw, 1.1rem); }
+
+    .progres { background: var(--card); border-radius: 12px; padding: 10px 14px; margin-bottom: clamp(10px, 2.5vh, 24px); }
+    .progres .teks { display: flex; justify-content: space-between; color: var(--muted); font-size: clamp(.8rem, 1.6vw, 1.1rem); margin-bottom: 6px; gap: 10px; }
+    .progres .garis { height: 10px; background: rgba(255,255,255,.12); border-radius: 6px; overflow: hidden; }
+    .progres .garis i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--bar2)); transition: width .6s; }
+    .selesai { color: var(--ok); font-weight: 800; }
+
+    /* baris kandidat (posisi absolut supaya bisa beranimasi saat urutan berubah) */
+    #daftar { position: relative; }
+    .baris {
+      position: absolute; left: 0; right: 0; height: var(--rh);
+      display: flex; align-items: center; gap: clamp(10px, 2vw, 24px);
+      background: var(--card); border-radius: 20px; padding: 0 clamp(10px, 2vw, 24px);
+      transition: top .8s cubic-bezier(.2,.8,.2,1), box-shadow .4s, background .4s;
+      border: 2px solid transparent;
+    }
+    .baris.unggul { border-color: var(--gold); background: rgba(251,191,36,.12); box-shadow: 0 0 28px rgba(251,191,36,.25); }
+    .rank { flex: 0 0 auto; width: clamp(34px, 6vw, 64px); text-align: center; font-size: clamp(1.4rem, 4vw, 3rem); font-weight: 800; color: var(--muted); }
+    .baris.unggul .rank { color: var(--gold); }
+    .foto {
+      flex: 0 0 auto; height: calc(var(--rh) - 22px); aspect-ratio: 3 / 4; border-radius: 12px; overflow: hidden;
+      background: var(--bar); display: grid; place-items: center; font-weight: 800; font-size: clamp(1.4rem, 4vw, 3rem);
+    }
+    .foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .info { flex: 1; min-width: 0; }
+    .nama { font-size: clamp(1.05rem, 2.8vw, 2.2rem); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nama small { color: var(--muted); font-weight: 700; margin-right: 8px; }
+    .bar { height: clamp(10px, 2vh, 20px); background: rgba(255,255,255,.12); border-radius: 12px; overflow: hidden; margin-top: 8px; }
+    .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--bar), var(--bar2)); border-radius: 12px; transition: width .9s cubic-bezier(.2,.8,.2,1); }
+    .baris.unggul .bar i { background: linear-gradient(90deg, #f59e0b, var(--gold)); }
+    .angka { flex: 0 0 auto; text-align: right; min-width: clamp(70px, 12vw, 150px); }
+    .angka b { display: block; font-size: clamp(1.6rem, 5vw, 4rem); line-height: 1; font-variant-numeric: tabular-nums; }
+    .angka span { color: var(--muted); font-size: clamp(.8rem, 1.8vw, 1.4rem); font-weight: 700; }
+
+    .alat { position: fixed; right: 12px; bottom: 12px; display: flex; gap: 8px; opacity: .55; }
+    .alat:hover { opacity: 1; }
+    .alat button { font: inherit; border: 0; border-radius: 10px; padding: 10px 12px; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
+    #terakhir { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+<!-- LOGIN PIN -->
+<div id="login">
+  <h2>Layar Hasil Pemilihan</h2>
+  <p>Masukkan PIN panitia untuk menampilkan hasil.</p>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN">
+  <div id="loginErr" hidden></div>
+  <button id="btnLogin" class="btn" style="width:100%">Tampilkan</button>
+</div>
+
+<!-- LAYAR HASIL -->
+<div id="layar" hidden>
+  <header>
+    <h1 id="judul">Hasil Pemilihan</h1>
+    <div class="sub">Hasil penghitungan suara</div>
+    <div class="live"><i></i> LIVE</div>
+  </header>
+
+  <div class="ringkas">
+    <div class="box"><b id="nDihitung">0</b><span>Suara dihitung</span></div>
+    <div class="box"><b id="nMemilih">0</b><span>Sudah mencoblos</span></div>
+    <div class="box"><b id="nToken">0</b><span>Total pemilih</span></div>
+  </div>
+
+  <div class="progres">
+    <div class="teks"><span id="pTeks">Penghitungan suara</span><span id="pPersen">0%</span></div>
+    <div class="garis"><i id="pBar"></i></div>
+  </div>
+
+  <div id="daftar"></div>
+  <div id="terakhir"></div>
+</div>
+
+<div class="alat" id="alat" hidden>
+  <button id="btnFull" title="Layar penuh">⛶ Layar penuh</button>
+</div>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var C = window.APP_CONFIG;
+  var $ = function (id) { return document.getElementById(id); };
+  var POLL_MS = 5000;
+
+  var pin = sessionStorage.getItem('pinPanitia') || '';
+  var timer = null;
+  var baris = {};          // no kandidat -> { el, angka, suaraLama }
+  var gagalBerturut = 0;
+
+  document.title = 'Hasil - ' + C.JUDUL;
+  $('judul').textContent = 'Hasil ' + C.JUDUL;
+
+  function api(payload) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 20000);
+    return fetch(C.API_URL, { method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .finally(function () { clearTimeout(t); });
+  }
+
+  /* ---------- login ---------- */
+  function masuk(p) {
+    $('loginErr').hidden = true;
+    return api({ action: 'getRekap', pin: p }).then(function (r) {
+      if (!r.ok) {
+        $('loginErr').textContent = r.error === 'PIN_SALAH' ? 'PIN salah' : r.error;
+        $('loginErr').hidden = false;
+        sessionStorage.removeItem('pinPanitia');
+        return;
+      }
+      pin = p;
+      sessionStorage.setItem('pinPanitia', p);
+      $('login').hidden = true;
+      $('layar').hidden = false;
+      $('alat').hidden = false;
+      render(r);
+      clearInterval(timer);
+      timer = setInterval(segarkan, POLL_MS);
+    }).catch(function () {
+      $('loginErr').textContent = 'Tidak bisa terhubung ke server.';
+      $('loginErr').hidden = false;
+    });
+  }
+  $('btnLogin').addEventListener('click', function () { masuk($('pin').value.trim()); });
+  $('pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnLogin').click(); });
+
+  /* ---------- ambil data berkala ---------- */
+  function segarkan() {
+    api({ action: 'getRekap', pin: pin }).then(function (r) {
+      if (r.ok) { gagalBerturut = 0; render(r); }
+    }).catch(function () {
+      gagalBerturut++;
+      if (gagalBerturut >= 3) $('terakhir').textContent = 'Koneksi terputus, mencoba lagi…';
+    });
+  }
+
+  /* ---------- animasi angka ---------- */
+  function animasiAngka(el, dari, ke) {
+    if (dari === ke) { el.textContent = ke; return; }
+    var mulai = performance.now(), dur = 700;
+    function langkah(now) {
+      var p = Math.min(1, (now - mulai) / dur);
+      el.textContent = Math.round(dari + (ke - dari) * p);
+      if (p < 1) requestAnimationFrame(langkah);
+    }
+    requestAnimationFrame(langkah);
+  }
+
+  function setAngka(id, nilai) {
+    var el = $(id);
+    var lama = Number(el.getAttribute('data-n') || 0);
+    el.setAttribute('data-n', nilai);
+    animasiAngka(el, lama, nilai);
+  }
+
+  /* ---------- tampilkan hasil ---------- */
+  function buatBaris(k) {
+    var el = document.createElement('div');
+    el.className = 'baris';
+
+    var rank = document.createElement('div'); rank.className = 'rank';
+
+    var foto = document.createElement('div'); foto.className = 'foto';
+    if (k.foto) {
+      var img = document.createElement('img');
+      img.src = k.foto; img.alt = k.nama;
+      img.onerror = function () { img.remove(); foto.textContent = k.no; };
+      foto.appendChild(img);
+    } else {
+      foto.textContent = k.no;
+    }
+
+    var info = document.createElement('div'); info.className = 'info';
+    var nama = document.createElement('div'); nama.className = 'nama';
+    var no = document.createElement('small'); no.textContent = 'No. ' + k.no;
+    nama.appendChild(no); nama.appendChild(document.createTextNode(k.nama));
+    var bar = document.createElement('div'); bar.className = 'bar';
+    var isi = document.createElement('i'); bar.appendChild(isi);
+    info.appendChild(nama); info.appendChild(bar);
+
+    var angka = document.createElement('div'); angka.className = 'angka';
+    var b = document.createElement('b'); b.textContent = '0';
+    var persen = document.createElement('span'); persen.textContent = '0%';
+    angka.appendChild(b); angka.appendChild(persen);
+
+    el.appendChild(rank); el.appendChild(foto); el.appendChild(info); el.appendChild(angka);
+    $('daftar').appendChild(el);
+
+    return { el: el, rank: rank, isi: isi, b: b, persen: persen, suaraLama: 0 };
+  }
+
+  function render(r) {
+    setAngka('nDihitung', r.resiDihitung);
+    setAngka('nMemilih', r.sudahMemilih);
+    setAngka('nToken', r.totalPemilih);
+
+    // progres: suara yang sudah dihitung dari yang sudah mencoblos
+    var persenProg = r.sudahMemilih ? Math.min(100, Math.round((r.resiDihitung / r.sudahMemilih) * 100)) : 0;
+    $('pBar').style.width = persenProg + '%';
+    $('pPersen').textContent = persenProg + '%';
+    var selesai = r.sudahMemilih > 0 && r.resiBelumDihitung === 0 && r.resiDihitung >= r.sudahMemilih;
+    var pTeks = $('pTeks');
+    pTeks.textContent = selesai
+      ? 'Semua suara yang masuk sudah dihitung'
+      : r.resiDihitung + ' dari ' + r.sudahMemilih + ' suara sudah dihitung';
+    pTeks.className = selesai ? 'selesai' : '';
+
+    // urutkan: suara terbanyak di atas
+    var urut = r.kandidat.slice().sort(function (a, b) {
+      return (b.suara - a.suara) || (Number(a.no) - Number(b.no));
+    });
+    if (!urut.length) return;
+    var maks = urut[0].suara;
+    var total = r.resiDihitung || 0;
+
+    urut.forEach(function (k) {
+      if (!baris[k.no]) baris[k.no] = buatBaris(k);
+    });
+
+    var tinggi = baris[urut[0].no].el.offsetHeight;
+    var jarak = tinggi + 14;
+
+    urut.forEach(function (k, i) {
+      var s = baris[k.no];
+      s.el.style.top = (i * jarak) + 'px';
+      s.rank.textContent = i + 1;
+      var persen = total ? Math.round((k.suara / total) * 1000) / 10 : 0;
+      s.isi.style.width = persen + '%';
+      s.persen.textContent = persen + '%';
+      animasiAngka(s.b, s.suaraLama, k.suara);
+      s.suaraLama = k.suara;
+      s.el.classList.toggle('unggul', maks > 0 && k.suara === maks);
+    });
+    $('daftar').style.height = (urut.length * jarak) + 'px';
+
+    var d = new Date();
+    $('terakhir').textContent = 'Diperbarui ' + d.toLocaleTimeString('id-ID');
+  }
+
+  window.addEventListener('resize', function () {
+    // hitung ulang posisi saat ukuran layar berubah
+    if (!$('layar').hidden) segarkan();
+  });
+
+  /* ---------- layar penuh ---------- */
+  $('btnFull').addEventListener('click', function () {
+    if (!document.fullscreenElement) {
+      (document.documentElement.requestFullscreen || function () {}).call(document.documentElement);
+    } else {
+      document.exitFullscreen();
+    }
+  });
+
+  /* ---------- mulai ---------- */
+  if (!C.API_URL || C.API_URL.indexOf('GANTI_') === 0) {
+    $('loginErr').textContent = 'API_URL belum diisi di config.js';
+    $('loginErr').hidden = false;
+  } else if (pin) {
+    masuk(pin);
+  }
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>

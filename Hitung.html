@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Rekap Suara</title>
+  <link rel="manifest" href="manifest-hitung.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="apple-touch-icon" href="hitung-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="judul">Rekap Suara</h1>
+  <small>Khusus panitia</small>
+</header>
+
+<main>
+
+  <!-- LOGIN PIN -->
+  <section id="login" class="pin-box">
+    <h2>Masukkan PIN Panitia</h2>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN">
+    <div id="loginStatus" class="status error" hidden></div>
+    <button id="btnLogin" class="btn primary" style="width:100%">Masuk</button>
+  </section>
+
+  <!-- HALAMAN REKAP -->
+  <section id="panel" hidden>
+
+    <div class="scan-wrap">
+      <div id="readerRekap"></div>
+      <div class="scan-overlay">Scan QR resi dari kotak suara</div>
+    </div>
+
+    <div id="flash" class="flash idle">Menunggu scan resi…</div>
+
+    <div class="manual">
+      <input id="kodeManual" placeholder="Atau ketik kode resi" autocomplete="off" autocapitalize="characters">
+      <button id="btnKode" class="btn primary">Hitung</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat"><b id="sDihitung">0</b><span>Resi dihitung</span></div>
+      <div class="stat"><b id="sBelum">0</b><span>Resi belum dihitung</span></div>
+      <div class="stat"><b id="sMemilih">0</b><span>Token sudah memilih</span></div>
+      <div class="stat"><b id="sToken">0</b><span>Total token</span></div>
+    </div>
+
+    <div class="hasil">
+      <h3>Hasil Penghitungan</h3>
+      <div id="hasil"></div>
+    </div>
+
+    <div class="aksi">
+      <button id="btnRefresh" class="btn ghost">Segarkan</button>
+      <button id="btnKeluar" class="btn ghost">Keluar</button>
+    </div>
+  </section>
+
+</main>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var C = window.APP_CONFIG;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var pin = sessionStorage.getItem('pinPanitia') || '';
+  var scanner = null, scanning = false;
+  var busy = false, lastKode = '', lastTime = 0;
+  var refreshTimer = null;
+
+  document.title = 'Rekap - ' + C.JUDUL;
+  $('judul').textContent = 'Rekap ' + C.JUDUL;
+
+  var PESAN = {
+    SUDAH_DIHITUNG: '✖ Resi SUDAH pernah dihitung',
+    KODE_TIDAK_VALID: '✖ Resi tidak dikenal / palsu',
+    KODE_KOSONG: '✖ Kode kosong',
+    PIN_SALAH: '✖ PIN salah',
+    SERVER_SIBUK: '✖ Server sibuk, scan ulang'
+  };
+
+  function api(payload) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 30000);
+    return fetch(C.API_URL, { method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .finally(function () { clearTimeout(t); });
+  }
+
+  /* ---------- login ---------- */
+  function masuk(p) {
+    $('loginStatus').hidden = true;
+    return api({ action: 'getRekap', pin: p }).then(function (r) {
+      if (!r.ok) {
+        $('loginStatus').textContent = PESAN[r.error] || r.error;
+        $('loginStatus').hidden = false;
+        return;
+      }
+      pin = p;
+      sessionStorage.setItem('pinPanitia', p);
+      $('login').hidden = true;
+      $('panel').hidden = false;
+      render(r);
+      mulaiScan();
+      clearInterval(refreshTimer);
+      refreshTimer = setInterval(segarkan, 15000);
+    }).catch(function () {
+      $('loginStatus').textContent = 'Tidak bisa terhubung ke server.';
+      $('loginStatus').hidden = false;
+    });
+  }
+
+  $('btnLogin').addEventListener('click', function () { masuk($('pin').value.trim()); });
+  $('pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnLogin').click(); });
+
+  $('btnKeluar').addEventListener('click', function () {
+    sessionStorage.removeItem('pinPanitia');
+    clearInterval(refreshTimer);
+    (scanning ? scanner.stop().catch(function () {}) : Promise.resolve()).then(function () {
+      scanning = false;
+      location.reload();
+    });
+  });
+
+  /* ---------- scanner ---------- */
+  function mulaiScan() {
+    if (!scanner) scanner = new Html5Qrcode('readerRekap');
+    if (scanning) return;
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: function (w, h) { var s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+      function (teks) { hitung(String(teks).trim().toUpperCase()); },
+      function () {}
+    ).then(function () { scanning = true; })
+     .catch(function () { setFlash('err', 'Kamera tidak bisa dibuka. Pakai input kode manual.'); });
+  }
+
+  /* ---------- hitung resi ---------- */
+  function hitung(kode) {
+    if (!kode || busy) return;
+    var now = Date.now();
+    if (kode === lastKode && now - lastTime < 3000) return;   // abaikan baca ganda
+    lastKode = kode; lastTime = now;
+    busy = true;
+
+    api({ action: 'rekapScan', kode: kode, pin: pin }).then(function (r) {
+      if (r.ok) {
+        setFlash('ok', '✔ Resi sah, suara dihitung');
+        segarkan();
+      } else {
+        setFlash('err', PESAN[r.error] || ('✖ ' + r.error));
+      }
+    }).catch(function () {
+      setFlash('err', '✖ Koneksi gagal. Scan ulang resi ini.');
+      lastKode = '';
+    }).finally(function () {
+      setTimeout(function () { busy = false; }, 800);
+    });
+  }
+
+  $('btnKode').addEventListener('click', function () {
+    var k = $('kodeManual').value.trim().toUpperCase();
+    $('kodeManual').value = '';
+    lastKode = '';
+    hitung(k);
+  });
+  $('kodeManual').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnKode').click(); });
+
+  function setFlash(jenis, teks) {
+    var el = $('flash');
+    el.className = 'flash ' + jenis;
+    el.textContent = teks;
+    if (navigator.vibrate) navigator.vibrate(jenis === 'ok' ? 80 : [120, 60, 120]);
+  }
+
+  /* ---------- tampilan hasil ---------- */
+  function segarkan() {
+    return api({ action: 'getRekap', pin: pin }).then(function (r) {
+      if (r.ok) render(r);
+    }).catch(function () {});
+  }
+  $('btnRefresh').addEventListener('click', segarkan);
+
+  function render(r) {
+    $('sDihitung').textContent = r.resiDihitung;
+    $('sBelum').textContent = r.resiBelumDihitung;
+    $('sMemilih').textContent = r.sudahMemilih;
+    $('sToken').textContent = r.totalPemilih;
+
+    var total = r.resiDihitung || 0;
+    var box = $('hasil');
+    box.innerHTML = '';
+    r.kandidat.forEach(function (k) {
+      var persen = total ? Math.round((k.suara / total) * 1000) / 10 : 0;
+
+      var row = document.createElement('div'); row.className = 'baris-hasil';
+      var atas = document.createElement('div'); atas.className = 'atas';
+      var kiri = document.createElement('span'); kiri.textContent = 'No. ' + k.no + ' · ' + k.nama;
+      var kanan = document.createElement('span'); kanan.textContent = k.suara + ' suara (' + persen + '%)';
+      atas.appendChild(kiri); atas.appendChild(kanan);
+      var bar = document.createElement('div'); bar.className = 'bar';
+      var isi = document.createElement('i'); isi.style.width = persen + '%';
+      bar.appendChild(isi);
+      row.appendChild(atas); row.appendChild(bar);
+      box.appendChild(row);
+    });
+  }
+
+  /* ---------- mulai ---------- */
+  if (!C.API_URL || C.API_URL.indexOf('GANTI_') === 0) {
+    $('loginStatus').textContent = 'API_URL belum diisi di config.js';
+    $('loginStatus').hidden = false;
+  } else if (pin) {
+    masuk(pin);
+  }
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
