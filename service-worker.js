@@ -1,5 +1,5 @@
 // Service worker Coblos: network-first, API Apps Script TIDAK pernah di-cache.
-const CACHE = 'coblos-v3';
+const CACHE = 'coblos-v2';
 const SHELL = ['./', './index.html', './style.css', './config.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
