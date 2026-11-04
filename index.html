@@ -26,15 +26,6 @@
     </div>
     <div id="status" class="status" hidden></div>
 
-    <div class="manual no-print" id="manual" hidden>
-      <input id="tokenManual" placeholder="Atau ketik token (mode uji)" autocomplete="off" autocapitalize="characters">
-      <button id="btnManual" class="btn primary">Masuk</button>
-    </div>
-
-    <label class="opsi no-print">
-      <input type="checkbox" id="autoCetak">
-      Cetak resi otomatis ke printer thermal 80 mm
-    </label>
   </section>
 
   <!-- 2. PILIH KANDIDAT -->
@@ -119,12 +110,7 @@
   $('judul').textContent = C.JUDUL;
   $('rJudul').textContent = C.JUDUL.toUpperCase();
   $('rKet').textContent = C.KETERANGAN_RESI;
-  $('manual').hidden = !C.TAMPIL_INPUT_MANUAL;   // true = tampil, false = sembunyi
-
-  $('autoCetak').checked = localStorage.getItem('autoCetak') === '1';
-  $('autoCetak').addEventListener('change', function () {
-    localStorage.setItem('autoCetak', this.checked ? '1' : '0');
-  });
+  var AUTO_CETAK = false;   // cetak otomatis dimatikan (opsi dihilangkan dari layar)
 
   /* ---------- util ---------- */
   function show(nama) {
@@ -185,17 +171,6 @@
     if (!scanning) return Promise.resolve();
     return scanner.stop().catch(function () {}).then(function () { scanning = false; });
   }
-
-  /* ---------- input token manual (opsional, lihat config.js) ---------- */
-  $('btnManual').addEventListener('click', function () {
-    if (!C.TAMPIL_INPUT_MANUAL) return;
-    var t = ambilToken($('tokenManual').value);
-    $('tokenManual').value = '';
-    prosesToken(t);
-  });
-  $('tokenManual').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') $('btnManual').click();
-  });
 
   /* ---------- proses token ---------- */
   function prosesToken(t) {
@@ -309,7 +284,7 @@
     $('rKode').textContent = kode;
     show('resi');
 
-    if ($('autoCetak').checked) {
+    if (AUTO_CETAK) {
       setTimeout(function () { window.print(); }, 400);
     }
     mulaiHitungMundur();
@@ -337,7 +312,7 @@
   $('btnCetak').addEventListener('click', function () { window.print(); });
   $('btnSelesai').addEventListener('click', selesai);
   window.addEventListener('afterprint', function () {
-    if (!$('screen-resi').hidden && $('autoCetak').checked) selesai();
+    if (!$('screen-resi').hidden && AUTO_CETAK) selesai();
   });
 
   /* ---------- mulai ---------- */
