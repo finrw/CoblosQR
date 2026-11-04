@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hitung Suara</title>
+<link rel="manifest" href="manifest-hitung.json">
+<meta name="theme-color" content="#c8102e">
+<link rel="apple-touch-icon" href="hitung-192.png">
+<link rel="stylesheet" href="style.css">
+<style>
+  .stat-grid.tiga { grid-template-columns: repeat(3, 1fr); }
+  .btn.besar { width: 100%; font-size: 1.35rem; min-height: 76px; margin-top: 6px; }
+
+  .fase { text-align: center; font-weight: 800; font-size: 1.15rem; margin: 4px 0 10px; color: var(--brand-dark); }
+
+  /* kotak pengacakan */
+  .acak { position: relative; height: 220px; background: #0f172a; border-radius: var(--radius); overflow: hidden; margin-bottom: 12px; }
+  .acak img {
+    position: absolute; width: 46px; height: 46px; background: #fff; padding: 3px;
+    border-radius: 6px; image-rendering: pixelated;
+    transition: left .45s ease-in-out, top .45s ease-in-out, transform .45s ease-in-out, opacity .5s;
+  }
+
+  /* kartu suara yang sedang dibuka */
+  .kartu-aktif {
+    display: flex; gap: 14px; align-items: center; background: #fff;
+    border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.12); min-height: 160px;
+  }
+  .kartu-aktif .qr { width: 110px; height: 110px; image-rendering: pixelated; flex: 0 0 auto; }
+  .kartu-aktif .kiri { text-align: center; flex: 0 0 auto; }
+  .kartu-aktif .kodeTeks { font-family: "Courier New", ui-monospace, monospace; font-weight: 800; letter-spacing: .1em; font-size: .85rem; margin-top: 6px; }
+  .kartu-aktif .isi { flex: 1; text-align: center; min-width: 0; }
+  .reveal { opacity: 0; transform: scale(.85); transition: opacity .25s, transform .25s; }
+  .reveal.tampil { opacity: 1; transform: scale(1); }
+  .kartu-aktif .isi img { width: 84px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; display: block; margin: 0 auto 6px; }
+  .kartu-aktif .no { font-size: 2.2rem; font-weight: 800; color: var(--brand); line-height: 1; }
+  .kartu-aktif .nama { font-weight: 700; overflow-wrap: anywhere; }
+  .kartu-aktif .tanya { font-size: 2.4rem; color: var(--muted); }
+
+  .progres { margin: 4px 0 14px; text-align: center; color: var(--muted); font-weight: 600; }
+
+  /* papan skor */
+  .papan { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kand { background: var(--card); border: 3px solid transparent; border-radius: var(--radius); padding: 12px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .kand img { display: block; width: 100%; max-width: 150px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 12px; margin: 0 auto 8px; }
+  .kand .no { display: inline-grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 800; font-size: 1.3rem; }
+  .kand .nama { font-weight: 700; margin: 6px 0 2px; overflow-wrap: anywhere; }
+  .kand .skor { font-size: 2.8rem; font-weight: 800; color: var(--brand); line-height: 1.1; }
+  .kand .persen { color: var(--muted); font-size: .9rem; min-height: 1.2em; }
+  .kand.bump .skor { animation: bump .3s; }
+  .kand.juara { border-color: var(--ok); background: var(--ok-bg); }
+  .kand.juara .skor { color: var(--ok); }
+  @keyframes bump { 50% { transform: scale(1.35); } }
+
+  .kontrol { display: flex; gap: 8px; margin: 14px 0 0; flex-wrap: wrap; }
+  .kontrol .btn { min-height: 46px; padding: 10px 14px; flex: 1 1 auto; font-size: .95rem; }
+  .btn.aktif { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+  .akhir { margin-top: 16px; }
+  .banner { padding: 16px; border-radius: 14px; text-align: center; font-weight: 800; font-size: 1.2rem; background: var(--ok-bg); color: var(--ok); }
+  .banner.seri { background: var(--info-bg); color: var(--info); }
+  .verif { margin-top: 10px; padding: 12px 14px; border-radius: 12px; font-weight: 600; text-align: center; }
+  .verif.ok { background: var(--ok-bg); color: var(--ok); }
+  .verif.beda { background: var(--err-bg); color: var(--err); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="judul">Hitung Suara</h1>
+  <small>Khusus panitia</small>
+</header>
+
+<main>
+
+  <!-- LOGIN PIN -->
+  <section id="login" class="pin-box">
+    <h2>Masukkan PIN Panitia</h2>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN">
+    <div id="loginStatus" class="status error" hidden></div>
+    <button id="btnLogin" class="btn primary" style="width:100%">Masuk</button>
+  </section>
+
+  <!-- PANEL -->
+  <section id="panel" hidden>
+
+    <!-- siap hitung -->
+    <div id="siap">
+      <div class="stat-grid tiga">
+        <div class="stat"><b id="sToken">0</b><span>Total token</span></div>
+        <div class="stat"><b id="sMemilih">0</b><span>Sudah memilih</span></div>
+        <div class="stat"><b id="sKotak">0</b><span>Suara di kotak</span></div>
+      </div>
+      <div id="status" class="status" hidden></div>
+      <button id="btnHitung" class="btn primary besar">HITUNG SUARA</button>
+      <div class="aksi">
+        <button id="btnKeluar" class="btn ghost">Keluar</button>
+      </div>
+    </div>
+
+    <!-- layar penghitungan -->
+    <div id="stage" hidden>
+      <div id="fase" class="fase"></div>
+
+      <div id="acak" class="acak" hidden></div>
+
+      <div id="kartuAktif" class="kartu-aktif" hidden>
+        <div class="kiri">
+          <img id="aQr" class="qr" alt="">
+          <div id="aKode" class="kodeTeks"></div>
+        </div>
+        <div class="isi">
+          <div id="aTanya" class="tanya">?</div>
+          <div id="aIsi" class="reveal"></div>
+        </div>
+      </div>
+
+      <div class="progres">
+        <div class="bar"><i id="barProg"></i></div>
+        <span id="progTeks"></span>
+      </div>
+
+      <div id="papan" class="papan"></div>
+
+      <div id="kontrol" class="kontrol">
+        <button id="btnJeda" class="btn ghost">Jeda</button>
+        <button class="btn ghost kec" data-kec="pelan">Pelan</button>
+        <button class="btn ghost kec aktif" data-kec="normal">Normal</button>
+        <button class="btn ghost kec" data-kec="cepat">Cepat</button>
+      </div>
+
+      <div id="akhir" class="akhir" hidden>
+        <div id="banner" class="banner"></div>
+        <div id="verif" class="verif"></div>
+        <div class="aksi">
+          <button id="btnUlang" class="btn ghost">Hitung Ulang</button>
+          <button id="btnKeluar2" class="btn ghost">Keluar</button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var C = window.APP_CONFIG;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var pin = sessionStorage.getItem('pinPanitia') || '';
+  var data = null;
+  var sedangJalan = false, jeda = false, kecepatan = 'normal';
+  var JEDA_MS = { pelan: 1000, normal: 500, cepat: 120 };
+  var wakeLock = null;
+
+  document.title = 'Hitung - ' + C.JUDUL;
+  $('judul').textContent = 'Hitung ' + C.JUDUL;
+
+  var PESAN = {
+    PIN_SALAH: '✖ PIN salah',
+    AKSI_TIDAK_DIKENAL: 'Backend belum diperbarui: tambahkan ambilSuara di Code.gs lalu deploy ulang.',
+    SERVER_ERROR: 'Terjadi kesalahan di server.'
+  };
+
+  /* ---------- util ---------- */
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function tungguJeda() {
+    return new Promise(function (res) {
+      (function cek() { if (!jeda) res(); else setTimeout(cek, 150); })();
+    });
+  }
+
+  function rand(n) {
+    if (window.crypto && window.crypto.getRandomValues) {
+      var a = new Uint32Array(1);
+      window.crypto.getRandomValues(a);
+      return a[0] % n;
+    }
+    return Math.floor(Math.random() * n);
+  }
+
+  function acakArray(arr) {
+    var b = arr.slice();
+    for (var i = b.length - 1; i > 0; i--) {
+      var j = rand(i + 1), t = b[i]; b[i] = b[j]; b[j] = t;
+    }
+    return b;
+  }
+
+  function qrUrl(teks, ukuran) {
+    var q = qrcode(0, 'M');
+    q.addData(String(teks));
+    q.make();
+    return q.createDataURL(ukuran || 3, 1);
+  }
+
+  function api(payload) {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 30000);
+    return fetch(C.API_URL, { method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .finally(function () { clearTimeout(t); });
+  }
+
+  function setStatus(teks, jenis) {
+    var el = $('status');
+    if (!teks) { el.hidden = true; return; }
+    el.textContent = teks;
+    el.className = 'status ' + (jenis || 'info');
+    el.hidden = false;
+  }
+
+  function layarTetapNyala() {
+    try {
+      if (navigator.wakeLock) {
+        navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+
+  function cariKandidat(no) {
+    var k = data.kandidat;
+    for (var i = 0; i < k.length; i++) if (String(k[i].no) === String(no)) return k[i];
+    return null;
+  }
+
+  /* ---------- login ---------- */
+  function masuk(p) {
+    $('loginStatus').hidden = true;
+    return api({ action: 'getRekap', pin: p }).then(function (r) {
+      if (!r.ok) {
+        $('loginStatus').textContent = PESAN[r.error] || r.error;
+        $('loginStatus').hidden = false;
+        return;
+      }
+      pin = p;
+      sessionStorage.setItem('pinPanitia', p);
+      $('login').hidden = true;
+      $('panel').hidden = false;
+      $('sToken').textContent = r.totalPemilih;
+      $('sMemilih').textContent = r.sudahMemilih;
+      $('sKotak').textContent = r.resiTercetak;
+    }).catch(function () {
+      $('loginStatus').textContent = 'Tidak bisa terhubung ke server.';
+      $('loginStatus').hidden = false;
+    });
+  }
+
+  $('btnLogin').addEventListener('click', function () { masuk($('pin').value.trim()); });
+  $('pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnLogin').click(); });
+
+  function keluar() {
+    sessionStorage.removeItem('pinPanitia');
+    location.reload();
+  }
+  $('btnKeluar').addEventListener('click', keluar);
+  $('btnKeluar2').addEventListener('click', keluar);
+
+  /* ---------- kontrol ---------- */
+  $('btnJeda').addEventListener('click', function () {
+    jeda = !jeda;
+    this.textContent = jeda ? 'Lanjut' : 'Jeda';
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.kec'), function (b) {
+    b.addEventListener('click', function () {
+      kecepatan = b.getAttribute('data-kec');
+      Array.prototype.forEach.call(document.querySelectorAll('.kec'), function (x) { x.classList.remove('aktif'); });
+      b.classList.add('aktif');
+    });
+  });
+
+  /* ---------- mulai hitung ---------- */
+  function mulaiHitung() {
+    if (sedangJalan) return;
+    $('btnHitung').disabled = true;
+    setStatus('Mengambil data suara…', 'info');
+    api({ action: 'ambilSuara', pin: pin }).then(function (r) {
+      if (!r.ok) {
+        setStatus(PESAN[r.error] || ('Gagal: ' + r.error), 'error');
+        $('btnHitung').disabled = false;
+        return;
+      }
+      if (!r.suara || !r.suara.length) {
+        setStatus('Belum ada suara di kotak.', 'error');
+        $('btnHitung').disabled = false;
+        return;
+      }
+      data = r;
+      setStatus('');
+      jalankan();
+    }).catch(function () {
+      setStatus('Tidak bisa terhubung ke server. Coba lagi.', 'error');
+      $('btnHitung').disabled = false;
+    });
+  }
+  $('btnHitung').addEventListener('click', mulaiHitung);
+
+  $('btnUlang').addEventListener('click', function () {
+    $('stage').hidden = true;
+    $('siap').hidden = false;
+    $('btnHitung').disabled = false;
+    mulaiHitung();
+  });
+
+  /* ---------- tampilan ---------- */
+  function buatPapan(kandidat) {
+    var box = $('papan');
+    box.innerHTML = '';
+    kandidat.forEach(function (k) {
+      var el = document.createElement('div');
+      el.className = 'kand';
+      el.id = 'k-' + k.no;
+      if (k.foto) {
+        var img = document.createElement('img');
+        img.src = k.foto; img.alt = k.nama;
+        img.onerror = function () { img.remove(); };
+        el.appendChild(img);
+      }
+      var no = document.createElement('div'); no.className = 'no'; no.textContent = k.no;
+      var nm = document.createElement('div'); nm.className = 'nama'; nm.textContent = k.nama;
+      var sk = document.createElement('div'); sk.className = 'skor'; sk.textContent = '0';
+      var ps = document.createElement('div'); ps.className = 'persen';
+      el.appendChild(no); el.appendChild(nm); el.appendChild(sk); el.appendChild(ps);
+      box.appendChild(el);
+    });
+  }
+
+  function perbaruiSkor(noAktif, skor, selesai, total) {
+    data.kandidat.forEach(function (k) {
+      var el = $('k-' + k.no);
+      el.querySelector('.skor').textContent = skor[k.no];
+      if (String(k.no) === String(noAktif)) {
+        el.classList.remove('bump');
+        void el.offsetWidth;
+        el.classList.add('bump');
+      }
+    });
+    $('barProg').style.width = (selesai / total * 100) + '%';
+    $('progTeks').textContent = 'Suara ke-' + selesai + ' dari ' + total;
+  }
+
+  function tampilKartu(kode, k) {
+    $('kartuAktif').hidden = false;
+    $('aQr').src = qrUrl(kode, 4);
+    $('aKode').textContent = kode;
+    var isi = $('aIsi');
+    if (!k) {
+      isi.classList.remove('tampil');
+      $('aTanya').hidden = false;
+      return;
+    }
+    isi.innerHTML = '';
+    if (k.foto) {
+      var img = document.createElement('img');
+      img.src = k.foto; img.alt = k.nama;
+      img.onerror = function () { img.remove(); };
+      isi.appendChild(img);
+    }
+    var no = document.createElement('div'); no.className = 'no'; no.textContent = 'No. ' + k.no;
+    var nm = document.createElement('div'); nm.className = 'nama'; nm.textContent = k.nama;
+    isi.appendChild(no); isi.appendChild(nm);
+    $('aTanya').hidden = true;
+    void isi.offsetWidth;
+    isi.classList.add('tampil');
+  }
+
+  /* ---------- animasi mengacak ---------- */
+  async function animasiAcak(daftar) {
+    var box = $('acak');
+    box.innerHTML = '';
+    box.hidden = false;
+    var W = box.clientWidth, H = box.clientHeight, T = 46;
+    var m = Math.min(daftar.length, 48);
+    var tiles = [];
+    var i;
+    function posisiAcak(el) {
+      el.style.left = rand(Math.max(1, W - T)) + 'px';
+      el.style.top = rand(Math.max(1, H - T)) + 'px';
+      el.style.transform = 'rotate(' + (rand(60) - 30) + 'deg)';
+    }
+    for (i = 0; i < m; i++) {
+      var img = new Image();
+      img.alt = '';
+      img.src = qrUrl(daftar[i].kode, 3);
+      posisiAcak(img);
+      box.appendChild(img);
+      tiles.push(img);
+    }
+    void box.offsetWidth;
+    await sleep(500);
+    for (var r = 0; r < 6; r++) {
+      tiles.forEach(posisiAcak);
+      await sleep(520);
+    }
+    tiles.forEach(function (el) {
+      el.style.left = (W / 2 - T / 2 + rand(9) - 4) + 'px';
+      el.style.top = (H / 2 - T / 2 + rand(9) - 4) + 'px';
+      el.style.transform = 'rotate(' + (rand(20) - 10) + 'deg)';
+    });
+    await sleep(700);
+    tiles.forEach(function (el) { el.style.opacity = '0'; });
+    await sleep(500);
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+
+  /* ---------- proses utama ---------- */
+  async function jalankan() {
+    sedangJalan = true; jeda = false;
+    $('btnJeda').textContent = 'Jeda';
+    layarTetapNyala();
+
+    $('siap').hidden = true;
+    $('stage').hidden = false;
+    $('akhir').hidden = true;
+    $('kontrol').hidden = false;
+    $('kartuAktif').hidden = true;
+    $('barProg').style.width = '0';
+    $('progTeks').textContent = '';
+
+    var kandidat = data.kandidat;
+    var daftar = acakArray(data.suara);
+    var n = daftar.length;
+    var skor = {};
+    kandidat.forEach(function (k) { skor[k.no] = 0; });
+    var tidakSah = 0;
+
+    buatPapan(kandidat);
+    $('fase').textContent = 'Mengacak ' + n + ' suara dalam kotak…';
+    await animasiAcak(daftar);
+
+    $('fase').textContent = 'Penghitungan dimulai';
+    for (var i = 0; i < n; i++) {
+      await tungguJeda();
+      var s = daftar[i];
+      var k = cariKandidat(s.no);
+
+      tampilKartu(s.kode, null);
+      var d = JEDA_MS[kecepatan];
+      if (n - i <= 2) d = Math.max(d, 1400);   // dua suara terakhir lebih pelan
+
+      await sleep(d * 0.45);
+      tampilKartu(s.kode, k);
+      if (k) skor[k.no]++; else tidakSah++;
+      perbaruiSkor(k ? k.no : null, skor, i + 1, n);
+      await sleep(d * 0.55);
+    }
+
+    selesai(skor, n, tidakSah);
+    sedangJalan = false;
+  }
+
+  function selesai(skor, n, tidakSah) {
+    $('fase').textContent = 'Penghitungan selesai';
+    $('kartuAktif').hidden = true;
+    $('kontrol').hidden = true;
+
+    var maks = -1;
+    data.kandidat.forEach(function (k) { if (skor[k.no] > maks) maks = skor[k.no]; });
+    var juara = data.kandidat.filter(function (k) { return skor[k.no] === maks; });
+
+    data.kandidat.forEach(function (k) {
+      var el = $('k-' + k.no);
+      var persen = n ? Math.round(skor[k.no] / n * 1000) / 10 : 0;
+      el.querySelector('.persen').textContent = persen + '%';
+      if (juara.length === 1 && skor[k.no] === maks) el.classList.add('juara');
+    });
+
+    var banner = $('banner');
+    if (juara.length === 1) {
+      banner.className = 'banner';
+      banner.textContent = 'Terpilih: No. ' + juara[0].no + ' · ' + juara[0].nama + ' (' + maks + ' suara)';
+    } else {
+      banner.className = 'banner seri';
+      banner.textContent = 'SERI antara ' + juara.map(function (k) { return 'No. ' + k.no; }).join(' dan ') + ' (' + maks + ' suara)';
+    }
+
+    var verif = $('verif');
+    var sudah = Number(data.sudahMemilih);
+    var teks = 'Suara dihitung: ' + n + ' · Token sudah memilih: ' + sudah;
+    if (n === sudah && !tidakSah) {
+      verif.className = 'verif ok';
+      verif.textContent = '✔ Jumlah suara cocok dengan jumlah pemilih. ' + teks;
+    } else {
+      verif.className = 'verif beda';
+      verif.textContent = '⚠ Jumlah tidak cocok. ' + teks + (tidakSah ? ' · Tidak sah: ' + tidakSah : '');
+    }
+    $('akhir').hidden = false;
+  }
+
+  /* ---------- mulai ---------- */
+  if (!C.API_URL || C.API_URL.indexOf('GANTI_') === 0) {
+    $('loginStatus').textContent = 'API_URL belum diisi di config.js';
+    $('loginStatus').hidden = false;
+  } else if (pin) {
+    masuk(pin);
+  }
+})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
