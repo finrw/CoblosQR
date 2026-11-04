@@ -64,6 +64,32 @@
   .verif { margin-top: 10px; padding: 12px 14px; border-radius: 12px; font-weight: 600; text-align: center; }
   .verif.ok { background: var(--ok-bg); color: var(--ok); }
   .verif.beda { background: var(--err-bg); color: var(--err); }
+
+  /* ===== mode layar penuh (proyektor / TV) ===== */
+  html.penuh { font-size: clamp(18px, 2.6vh, 30px); }
+  html.penuh .topbar { display: none; }
+  html.penuh main { max-width: none; padding: 2vh 3vw; }
+  html.penuh .fase { font-size: 1.8rem; margin: 0 0 1.2vh; }
+  html.penuh .acak { height: 40vh; }
+  html.penuh .kartu-aktif { min-height: 0; padding: 2vh 3vw; gap: 3vw; justify-content: center; }
+  html.penuh .kartu-aktif .qr { width: 20vh; height: 20vh; }
+  html.penuh .kartu-aktif .kodeTeks { font-size: 1.3rem; }
+  html.penuh .kartu-aktif .isi { flex: 0 1 40%; }
+  html.penuh .kartu-aktif .isi img { height: 20vh; width: auto; aspect-ratio: 3 / 4; }
+  html.penuh .kartu-aktif .no { font-size: 3.4rem; }
+  html.penuh .kartu-aktif .nama { font-size: 1.6rem; }
+  html.penuh .kartu-aktif .tanya { font-size: 5rem; }
+  html.penuh .progres { font-size: 1.3rem; }
+  html.penuh .papan { grid-template-columns: repeat(auto-fit, minmax(16vw, 1fr)); gap: 2vw; }
+  html.penuh .kand img { height: 22vh; width: auto; max-width: 100%; }
+  html.penuh .kand .no { width: 2.2em; height: 2.2em; font-size: 1.6rem; }
+  html.penuh .kand .nama { font-size: 1.5rem; }
+  html.penuh .kand .skor { font-size: 4.5rem; }
+  html.penuh .kand .persen { font-size: 1.3rem; }
+  html.penuh .banner { font-size: 2.2rem; padding: 3vh 2vw; }
+  html.penuh .verif { font-size: 1.3rem; }
+  html.penuh .kontrol { opacity: .55; }
+  html.penuh .kontrol:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -96,6 +122,7 @@
       <div id="status" class="status" hidden></div>
       <button id="btnHitung" class="btn primary besar">HITUNG SUARA</button>
       <div class="aksi">
+        <button class="btn ghost tglPenuh">⛶ Layar Penuh</button>
         <button id="btnKeluar" class="btn ghost">Keluar</button>
       </div>
     </div>
@@ -129,6 +156,7 @@
         <button class="btn ghost kec" data-kec="pelan">Pelan</button>
         <button class="btn ghost kec aktif" data-kec="normal">Normal</button>
         <button class="btn ghost kec" data-kec="cepat">Cepat</button>
+        <button class="btn ghost tglPenuh">⛶ Layar Penuh</button>
       </div>
 
       <div id="akhir" class="akhir" hidden>
@@ -136,6 +164,7 @@
         <div id="verif" class="verif"></div>
         <div class="aksi">
           <button id="btnUlang" class="btn ghost">Hitung Ulang</button>
+          <button class="btn ghost tglPenuh">⛶ Layar Penuh</button>
           <button id="btnKeluar2" class="btn ghost">Keluar</button>
         </div>
       </div>
@@ -379,7 +408,8 @@
     var box = $('acak');
     box.innerHTML = '';
     box.hidden = false;
-    var W = box.clientWidth, H = box.clientHeight, T = 46;
+    var W = box.clientWidth, H = box.clientHeight;
+    var T = Math.max(46, Math.round(H * 0.2));
     var m = Math.min(daftar.length, 48);
     var tiles = [];
     var i;
@@ -391,6 +421,8 @@
     for (i = 0; i < m; i++) {
       var img = new Image();
       img.alt = '';
+      img.style.width = T + 'px';
+      img.style.height = T + 'px';
       img.src = qrUrl(daftar[i].kode, 3);
       posisiAcak(img);
       box.appendChild(img);
@@ -497,6 +529,46 @@
     }
     $('akhir').hidden = false;
   }
+
+  /* ---------- layar penuh ---------- */
+  function elemenFS() { return document.fullscreenElement || document.webkitFullscreenElement; }
+
+  function labelPenuh() {
+    var aktif = document.documentElement.classList.contains('penuh');
+    Array.prototype.forEach.call(document.querySelectorAll('.tglPenuh'), function (b) {
+      b.textContent = aktif ? '⛶ Keluar Layar Penuh' : '⛶ Layar Penuh';
+    });
+  }
+
+  function togglePenuh() {
+    var de = document.documentElement;
+    if (elemenFS()) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      return;
+    }
+    if (de.classList.contains('penuh')) {      // mode besar tanpa API layar penuh
+      de.classList.remove('penuh');
+      labelPenuh();
+      return;
+    }
+    de.classList.add('penuh');                 // tetap membesar walau browser menolak layar penuh
+    var req = de.requestFullscreen || de.webkitRequestFullscreen;
+    if (req) {
+      try { var p = req.call(de); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+    }
+    labelPenuh();
+  }
+
+  function syncPenuh() {
+    if (!elemenFS()) document.documentElement.classList.remove('penuh');
+    labelPenuh();
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.tglPenuh'), function (b) {
+    b.addEventListener('click', togglePenuh);
+  });
+  document.addEventListener('fullscreenchange', syncPenuh);
+  document.addEventListener('webkitfullscreenchange', syncPenuh);
 
   /* ---------- mulai ---------- */
   if (!C.API_URL || C.API_URL.indexOf('GANTI_') === 0) {
