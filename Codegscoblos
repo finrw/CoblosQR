@@ -53,6 +53,7 @@ function doPost(e) {
       case 'coblos':    return json_(coblos_(req.token, req.noKandidat));
       case 'rekapScan': return json_(rekapScan_(req.kode, req.pin));
       case 'getRekap':  return json_(getRekap_(req.pin));
+      case 'ambilSuara': return json_(ambilSuara_(req.pin));
       default:          return json_({ ok: false, error: 'AKSI_TIDAK_DIKENAL' });
     }
   } catch (err) {
@@ -464,4 +465,30 @@ function kolom_(sheet, namaList) {
       header.push(nama);
     }
   });
+}
+
+// ======================= 5. AMBIL SUARA UNTUK HITUNG =================
+// Hanya kode acak + nomor kandidat. Tanpa token, tanpa waktu, tanpa identitas.
+function ambilSuara_(pin) {
+  if (!cekPin_(pin)) return { ok: false, error: 'PIN_SALAH' };
+
+  var ss = getSS_();
+  var sua = ss.getSheetByName(CFG.SHEET_SUARA).getDataRange().getValues();
+  var suara = [];
+  for (var i = 1; i < sua.length; i++) {
+    var kode = String(sua[i][0]).trim();
+    if (!kode) continue;
+    suara.push({ kode: kode, no: sua[i][1] });
+  }
+
+  var pv = ss.getSheetByName(CFG.SHEET_PEMILIH).getDataRange().getValues();
+  var h = pv[0].map(function (x) { return String(x).trim(); });
+  var iToken = h.indexOf('Token'), iMemilih = h.indexOf('SudahMemilih');
+  var sudahMemilih = 0;
+  for (var r = 1; r < pv.length; r++) {
+    if (!pv[r][iToken]) continue;
+    if (iMemilih >= 0 && pv[r][iMemilih] === true) sudahMemilih++;
+  }
+
+  return { ok: true, kandidat: daftarKandidat_(), suara: suara, sudahMemilih: sudahMemilih };
 }
