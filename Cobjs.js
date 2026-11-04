@@ -1,494 +1,516 @@
 /**
- * =====================================================================
- *  PEMILIHAN DIGITAL RW - BACKEND (code.gs)
- *  Hosting tampilan (HTML/CSS/JS) ada di GitHub Pages.
- *  Script ini hanya menjadi API JSON (Web App).
- * =====================================================================
- *
- *  SPREADSHEET KHUSUS PENCOBLOSAN (terpisah dari PILIH_RW).
- *  Script ini TERIKAT ke spreadsheet pencoblosan tersebut.
- *
- *  SHEET YANG DIPAKAI:
- *   - Pemilih  : daftar token dari PILIH_RW. Terisi otomatis saat token
- *                di-scan (sinkron langsung ke PILIH_RW), atau lewat menu
- *                "Pemilihan > Impor / Sinkron Token".
- *                Kolom: Token | SudahMemilih
- *   - Kandidat : dibuat otomatis oleh setup() -> NoKandidat | Nama | Foto
- *   - Suara    : dibuat otomatis oleh setup() -> Kode | NoKandidat |
- *                StatusRekap | WaktuRekap
- *
- *  KERAHASIAAN:
- *   - Sheet Pemilih hanya diberi tanda SudahMemilih = TRUE (tanpa waktu).
- *   - Sheet Suara TIDAK menyimpan identitas/token/waktu coblos.
- *   - Baris suara disisipkan di posisi acak supaya urutan baris tidak
- *     bisa dicocokkan dengan urutan orang yang memilih.
- *
- *  ACTION API (POST, body JSON, Content-Type: text/plain):
- *   cekToken    {token}               -> data pemilih + daftar kandidat
- *   coblos      {token, noKandidat}   -> {kode} (isi barcode resi)
- *   rekapScan   {kode, pin}           -> tandai 1 resi sudah dihitung
- *   getRekap    {pin}                 -> hasil per kandidat
- * =====================================================================
+ * APLIKASI PENDAFTARAN PEMILIH & GENERATE UNDANGAN PDF
+ * =============================================================
+ * Kolom sheet Pemilih:
+ * A No | B NIK | C Nama | D Token | E SudahDicetak | F SudahMemilih |
+ * G Timestamp | H NoWhatsApp | I Blok | J NoRumah | K NoBlok
  */
+const SHEET_PEMILIH = 'Pemilih';
 
-// ======================= KONFIGURASI =================================
-var CFG = {
-  SHEET_PEMILIH: 'Pemilih',
-  SHEET_KANDIDAT: 'Kandidat',
-  SHEET_SUARA: 'Suara',
-  PANJANG_KODE: 10,
-  ALFABET_KODE: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // tanpa I, O, 0, 1 agar mudah dibaca
-};
+// ==== KONFIGURASI FOLDER & TEMPLATE GOOGLE DRIVE ====
+const FOLDER_UNDANGAN_ID = '1EmJ4lBKym19anF79mfV97jABf4Qoj3DK';
+const TEMPLATE_DOC_ID = '18m2mDlKFFh-DZ5s8Kdzo2C5NVzy5wNFjzUW9JCrCbYE';
 
-// ======================= ENTRY POINT =================================
-function doGet(e) {
-  return json_({ ok: true, pesan: 'API Pemilihan RW aktif' });
-}
+// ==== PIN MANUAL ====
+const PIN_INPUT = '123456'; // PIN halaman INPUT (daftar NIK)
+const PIN_CETAK = '654321'; // PIN halaman CETAK undangan & DAFTAR pemilih
 
-function doPost(e) {
-  try {
-    var req = JSON.parse(e.postData.contents || '{}');
-    switch (req.action) {
-      case 'cekToken':  return json_(cekToken_(req.token));
-      case 'coblos':    return json_(coblos_(req.token, req.noKandidat));
-      case 'rekapScan': return json_(rekapScan_(req.kode, req.pin));
-      case 'getRekap':  return json_(getRekap_(req.pin));
-      case 'ambilSuara': return json_(ambilSuara_(req.pin));
-      default:          return json_({ ok: false, error: 'AKSI_TIDAK_DIKENAL' });
-    }
-  } catch (err) {
-    return json_({ ok: false, error: 'SERVER_ERROR', detail: String(err) });
-  }
-}
-
-// ======================= SETUP (jalankan 1x) =========================
 /**
- * Jalankan manual dari editor: membuat sheet Kandidat & Suara jika belum ada.
+ * Jalankan SEKALI dari menu Google Sheet untuk membuat struktur sheet.
  */
-function setup() {
-  var ss = getSS_();
-
-  var kan = ss.getSheetByName(CFG.SHEET_KANDIDAT);
-  if (!kan) {
-    kan = ss.insertSheet(CFG.SHEET_KANDIDAT);
-    kan.appendRow(['NoKandidat', 'Nama', 'Foto']);
-    kan.appendRow([1, 'Nama Kandidat 1', '']);
-    kan.appendRow([2, 'Nama Kandidat 2', '']);
-    kan.setFrozenRows(1);
+function setupSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_PEMILIH);
+  if (!sh) sh = ss.insertSheet(SHEET_PEMILIH);
+  sh.clear();
+  sh.appendRow(['No', 'NIK', 'Nama', 'Token', 'SudahDicetak', 'SudahMemilih',
+    'Timestamp', 'NoWhatsApp', 'Blok', 'NoRumah', 'NoBlok']);
+  sh.setFrozenRows(1);
+  sh.getRange('B:B').setNumberFormat('@'); // NIK
+  sh.getRange('H:H').setNumberFormat('@'); // NoWhatsApp
+  sh.getRange('K:K').setNumberFormat('@'); // NoBlok
+  sh.getRange('A:A').setNumberFormat('0');
+  sh.autoResizeColumns(1, 11);
+  const pesan = 'Setup selesai! Sheet Pemilih sudah siap digunakan.';
+  try {
+    SpreadsheetApp.getUi().alert(pesan);
+  } catch (e) {
+    Logger.log(pesan);
   }
-
-  var sua = ss.getSheetByName(CFG.SHEET_SUARA);
-  if (!sua) {
-    sua = ss.insertSheet(CFG.SHEET_SUARA);
-    sua.appendRow(['Kode', 'NoKandidat', 'StatusRekap', 'WaktuRekap']);
-    sua.setFrozenRows(1);
-  }
-
-  var pem = ss.getSheetByName(CFG.SHEET_PEMILIH);
-  if (!pem) {
-    pem = ss.insertSheet(CFG.SHEET_PEMILIH);
-    pem.appendRow(['Token', 'SudahMemilih']);
-    pem.setFrozenRows(1);
-  }
-
-  Logger.log('Setup selesai. Edit sheet Kandidat, isi SOURCE_SS_ID, lalu impor pemilih.');
 }
 
-/** Menu di spreadsheet agar panitia tidak perlu membuka editor kode. */
+/**
+ * MIGRASI: Tambahkan kolom WhatsApp & Alamat jika belum ada
+ */
+function migrasiTambahKolomKontak() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  if (header.indexOf('NoWhatsApp') !== -1) {
+    const pesan = 'Kolom NoWhatsApp/Blok/NoRumah sudah ada.';
+    try { SpreadsheetApp.getUi().alert(pesan); } catch (e) { Logger.log(pesan); }
+    return;
+  }
+  const kolomBaruMulai = sh.getLastColumn() + 1;
+  sh.getRange(1, kolomBaruMulai, 1, 3).setValues([['NoWhatsApp', 'Blok', 'NoRumah']]);
+  sh.getRange(1, kolomBaruMulai, sh.getMaxRows(), 1).setNumberFormat('@');
+  sh.autoResizeColumns(kolomBaruMulai, 3);
+  const pesan = 'Migrasi selesai!';
+  try { SpreadsheetApp.getUi().alert(pesan); } catch (e) { Logger.log(pesan); }
+}
+
+/**
+ * MIGRASI: Tambahkan kolom NoBlok (kolom K) jika belum ada
+ */
+function migrasiTambahNoBlok() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const header = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 11)).getValues()[0];
+  let pesan;
+  if (header[10] === 'NoBlok') {
+    pesan = 'Kolom NoBlok sudah ada (kolom K).';
+  } else {
+    sh.getRange(1, 11).setValue('NoBlok');
+    sh.getRange('K:K').setNumberFormat('@');
+    sh.autoResizeColumns(11, 1);
+    pesan = 'Kolom NoBlok berhasil ditambahkan (kolom K).';
+  }
+  try { SpreadsheetApp.getUi().alert(pesan); } catch (e) { Logger.log(pesan); }
+}
+
+/**
+ * Menu di Google Sheet
+ */
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('Pemilihan')
-    .addItem('1. Setup sheet', 'setup')
-    .addItem('2. Impor / Sinkron Token', 'importPilihan')
+    .createMenu('🗳 Pendaftaran RW')
+    .addItem('1. Setup Awal (jalankan sekali)', 'setupSheet')
+    .addItem('🔧 Migrasi: Tambah Kolom WhatsApp/Alamat', 'migrasiTambahKolomKontak')
+    .addItem('🔧 Migrasi: Tambah Kolom NoBlok', 'migrasiTambahNoBlok')
+    .addItem('📊 Lihat Jumlah Terdaftar', 'lihatJumlahTerdaftar')
     .addToUi();
 }
 
-/**
- * Isi ID spreadsheet PILIH_RW (bagian URL antara /d/ dan /edit), jalankan 1x,
- * lalu boleh dikembalikan ke teks semula.
- */
-function setSumberPemilihan() {
-  var ID_SUMBER = '1PHVsHaghFCFdtZiE-RuyHsC7O9BKaUgnJAFj2MnbZh4';
-  if (ID_SUMBER === 'GANTI_ID_SPREADSHEET_PILIH_RW') throw new Error('Ganti dulu ID_SUMBER');
-  PropertiesService.getScriptProperties().setProperty('SOURCE_SS_ID', ID_SUMBER);
-  Logger.log('ID spreadsheet sumber tersimpan.');
+function lihatJumlahTerdaftar() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const total = Math.max(sh.getLastRow() - 1, 0);
+  const belumDicetak = sh.getLastRow() > 1
+    ? sh.getRange(2, 5, sh.getLastRow() - 1, 1).getValues().filter(r => r[0] !== true && r[0] !== 'TRUE').length
+    : 0;
+  const pesan = 'Total terdaftar: ' + total + ' orang\nBelum dikirim undangannya: ' + belumDicetak + ' orang';
+  try {
+    SpreadsheetApp.getUi().alert(pesan);
+  } catch (e) {
+    Logger.log(pesan);
+  }
 }
 
-/**
- * Salin SEMUA token dari PILIH_RW (sheet "Pemilih", kolom Token) ke spreadsheet ini.
- * Aman dijalankan berulang (mis. ada pendaftar baru):
- *  - token baru ditambahkan
- *  - token yang sudah ada dilewati
- *  - kolom SudahMemilih TIDAK pernah ditimpa
- * Jangan jalankan ini saat pencoblosan sedang ramai-ramainya.
- */
-function importPilihan() {
-  var props = PropertiesService.getScriptProperties();
-  var idSumber = props.getProperty('SOURCE_SS_ID');
-  if (!idSumber) throw new Error('Jalankan setSumberPemilihan() dulu.');
-
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) throw new Error('Server sibuk, coba lagi.');
-
-  try {
-    var sumber = SpreadsheetApp.openById(idSumber).getSheetByName('Pemilih');
-    if (!sumber) throw new Error('Sheet "Pemilih" tidak ada di spreadsheet sumber.');
-
-    var sv = sumber.getDataRange().getValues();
-    var sh = sv[0].map(function (x) { return String(x).trim(); });
-    var sToken = sh.indexOf('Token');
-    if (sToken < 0) throw new Error('Kolom Token tidak ada di sumber.');
-
-    var tujuan = getSS_().getSheetByName(CFG.SHEET_PEMILIH);
-    if (!tujuan) throw new Error('Jalankan setup() dulu.');
-    var tv = tujuan.getDataRange().getValues();
-
-    // peta token -> nomor baris di sheet tujuan
-    var peta = {};
-    for (var i = 1; i < tv.length; i++) {
-      var t = String(tv[i][0]).trim().toUpperCase();
-      if (t) peta[t] = i + 1;
-    }
-
-    var baru = [], dilewati = 0;
-    for (var r = 1; r < sv.length; r++) {
-      var token = String(sv[r][sToken]).trim().toUpperCase();
-      if (!token) continue;
-      if (peta[token]) {
-        dilewati++;
-      } else {
-        peta[token] = true;            // cegah token ganda di sumber
-        baru.push([token, false]);
-      }
-    }
-    if (baru.length) {
-      tujuan.getRange(tujuan.getLastRow() + 1, 1, baru.length, 2).setValues(baru);
-    }
-    SpreadsheetApp.flush();
-    Logger.log('Impor selesai. Token baru: ' + baru.length + ', sudah ada: ' + dilewati);
-    try { SpreadsheetApp.getActive().toast('Baru: ' + baru.length + ', sudah ada: ' + dilewati, 'Impor selesai'); } catch (e) {}
-  } finally {
-    lock.releaseLock();
-  }
+/** Entry point Web App */
+function doGet(e) {
+  const page = (e && e.parameter && e.parameter.page) || 'input';
+  const namaFile = page === 'cetak' ? 'Cetak' : (page === 'daftar' ? 'Daftar' : 'Input');
+  const judul = page === 'daftar' ? 'Daftar Pemilih RW' : 'Pendaftaran Pemilih RW';
+  const template = HtmlService.createTemplateFromFile(namaFile);
+  return template.evaluate()
+    .setTitle(judul)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
- * Isi PIN di bawah, jalankan 1x, lalu HAPUS angkanya dari kode.
- * PIN dipakai untuk halaman rekap/penghitungan.
+ * API untuk halaman di GitHub Pages (PWA).
+ * Dipanggil lewat fetch POST dengan isi: {"action":"namaFungsi","args":[...]}.
+ * Hanya fungsi di daftar putih di bawah yang boleh dipanggil dari luar.
+ * PIN tetap diperiksa di dalam masing-masing fungsi.
  */
-function setPinPanitia() {
-  var PIN_BARU = 'GANTI_PIN_ANDA'; // <-- ganti, jalankan, lalu kembalikan ke teks ini
-  if (PIN_BARU === 'GANTI_PIN_ANDA') throw new Error('Ganti dulu PIN_BARU');
-  PropertiesService.getScriptProperties().setProperty('PIN_PANITIA', PIN_BARU);
-  Logger.log('PIN panitia tersimpan.');
-}
+const AKSI_API = {
+  verifikasiPin: verifikasiPin,
+  daftarkanPemilih: daftarkanPemilih,
+  ubahPemilih: ubahPemilih,
+  getSemuaPemilih: getSemuaPemilih,
+  getDaftarBelumDicetak: getDaftarBelumDicetak,
+  getDaftarSudahDicetak: getDaftarSudahDicetak,
+  cariPemilih: cariPemilih,
+  tandaiSudahDicetak: tandaiSudahDicetak,
+  kirimUndanganPdfPerWarga: kirimUndanganPdfPerWarga
+};
 
-// ======================= 1. CEK TOKEN ================================
-function cekToken_(token) {
-  // sinkron=true: kalau token belum ada di sini, cek langsung ke PILIH_RW
-  var cari = cariPemilih_(token, true);
-  if (!cari.ok) return cari;
-
-  return {
-    ok: true,
-    kandidat: daftarKandidat_()
-  };
-}
-
-// ======================= 2. COBLOS ===================================
-function coblos_(token, noKandidat) {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) return { ok: false, error: 'SERVER_SIBUK' };
-
+function doPost(e) {
+  let hasil;
   try {
-    // validasi ulang di dalam lock (TANPA sinkron, agar tidak kunci ganda)
-    var cari = cariPemilih_(token);
-    if (!cari.ok) return cari;
-
-    var kandidat = daftarKandidat_();
-    var valid = kandidat.some(function (k) { return String(k.no) === String(noKandidat); });
-    if (!valid) return { ok: false, error: 'KANDIDAT_TIDAK_VALID' };
-
-    var ss = getSS_();
-    var pem = ss.getSheetByName(CFG.SHEET_PEMILIH);
-    var sua = ss.getSheetByName(CFG.SHEET_SUARA);
-
-    // 1) kunci token dulu
-    pem.getRange(cari.baris, cari.kolMemilih).setValue(true);
-    SpreadsheetApp.flush();
-
-    // 2) simpan suara; jika gagal, buka kunci kembali
-    try {
-      var kode = buatKodeUnik_(sua);
-      var baris = [kode, Number(noKandidat), 'BELUM', ''];
-      sisipAcak_(sua, baris);
-      SpreadsheetApp.flush();
-      return { ok: true, kode: kode };
-    } catch (err) {
-      pem.getRange(cari.baris, cari.kolMemilih).setValue(false);
-      SpreadsheetApp.flush();
-      return { ok: false, error: 'GAGAL_SIMPAN', detail: String(err) };
-    }
-  } finally {
-    lock.releaseLock();
+    const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    const fungsi = Object.prototype.hasOwnProperty.call(AKSI_API, req.action) ? AKSI_API[req.action] : null;
+    if (!fungsi) throw new Error('Aksi tidak dikenal.');
+    const args = Array.isArray(req.args) ? req.args : [];
+    hasil = { ok: true, data: fungsi.apply(null, args) };
+  } catch (err) {
+    hasil = { ok: false, error: String(err && err.message ? err.message : err) };
   }
-}
-
-// ======================= 3. REKAP: SCAN RESI =========================
-function rekapScan_(kode, pin) {
-  if (!cekPin_(pin)) return { ok: false, error: 'PIN_SALAH' };
-  kode = String(kode || '').trim().toUpperCase();
-  if (!kode) return { ok: false, error: 'KODE_KOSONG' };
-
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) return { ok: false, error: 'SERVER_SIBUK' };
-
-  try {
-    var sua = getSS_().getSheetByName(CFG.SHEET_SUARA);
-    var data = sua.getDataRange().getValues();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]).trim().toUpperCase() === kode) {
-        if (String(data[i][2]).trim().toUpperCase() === 'SUDAH') {
-          return { ok: false, error: 'SUDAH_DIHITUNG' };
-        }
-        sua.getRange(i + 1, 3, 1, 2).setValues([['SUDAH', new Date()]]);
-        SpreadsheetApp.flush();
-        // sengaja TIDAK mengembalikan nomor kandidat ke layar scanner
-        return { ok: true, pesan: 'Resi sah dan sudah dihitung', total: hitungDirekap_() };
-      }
-    }
-    return { ok: false, error: 'KODE_TIDAK_VALID' };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// ======================= 4. HASIL REKAP ==============================
-function getRekap_(pin) {
-  if (!cekPin_(pin)) return { ok: false, error: 'PIN_SALAH' };
-
-  var ss = getSS_();
-  var kandidat = daftarKandidat_();
-  var hitung = {};
-  kandidat.forEach(function (k) { hitung[k.no] = 0; });
-
-  // hitung suara dari resi yang sudah di-scan (StatusRekap = SUDAH)
-  var sua = ss.getSheetByName(CFG.SHEET_SUARA).getDataRange().getValues();
-  var totalSuara = 0, sudahDirekap = 0;
-  for (var i = 1; i < sua.length; i++) {
-    if (!String(sua[i][0]).trim()) continue;
-    totalSuara++;
-    if (String(sua[i][2]).trim().toUpperCase() === 'SUDAH') {
-      sudahDirekap++;
-      var no = sua[i][1];
-      if (hitung[no] !== undefined) hitung[no]++;
-    }
-  }
-
-  // statistik pemilih
-  var pem = ss.getSheetByName(CFG.SHEET_PEMILIH);
-  var pv = pem.getDataRange().getValues();
-  var h = pv[0].map(function (x) { return String(x).trim(); });
-  var iMemilih = h.indexOf('SudahMemilih');
-  var totalPemilih = 0, sudahMemilih = 0;
-  for (var r = 1; r < pv.length; r++) {
-    if (!pv[r][h.indexOf('Token')]) continue;
-    totalPemilih++;
-    if (iMemilih >= 0 && pv[r][iMemilih] === true) sudahMemilih++;
-  }
-
-  return {
-    ok: true,
-    kandidat: kandidat.map(function (k) {
-      return { no: k.no, nama: k.nama, foto: k.foto, suara: hitung[k.no] };
-    }),
-    totalPemilih: totalPemilih,
-    sudahMemilih: sudahMemilih,
-    resiTercetak: totalSuara,
-    resiDihitung: sudahDirekap,
-    resiBelumDihitung: totalSuara - sudahDirekap
-  };
-}
-
-// ======================= HELPER ======================================
-function getSS_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (ss) return ss;
-  var id = PropertiesService.getScriptProperties().getProperty('SS_ID');
-  if (!id) throw new Error('Script tidak terikat spreadsheet. Isi Script Property SS_ID.');
-  return SpreadsheetApp.openById(id);
-}
-
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
+  return ContentService.createTextOutput(JSON.stringify(hasil))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/**
- * Cari token (sinkron=true: jika belum ada, cek PILIH_RW lalu tambahkan).
- * Tidak menyimpan/mengembalikan identitas apa pun.
- */
-function cariPemilih_(token, sinkron) {
-  token = String(token || '').trim().toUpperCase();
-  if (!token) return { ok: false, error: 'TOKEN_KOSONG' };
-
-  var hasil = cariDiSheet_(token);
-  if (hasil.error === 'TOKEN_TIDAK_DITEMUKAN' && sinkron) {
-    if (!tambahDariSumber_(token)) return hasil;
-    hasil = cariDiSheet_(token);
-  }
-  return hasil;
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-/** Cari token di sheet Pemilih spreadsheet ini + pastikan belum dipakai. */
-function cariDiSheet_(token) {
-  token = String(token || '').trim().toUpperCase();
-  if (!token) return { ok: false, error: 'TOKEN_KOSONG' };
-
-  var pem = getSS_().getSheetByName(CFG.SHEET_PEMILIH);
-  var data = pem.getDataRange().getValues();
-  var h = data[0].map(function (x) { return String(x).trim(); });
-
-  var iToken = h.indexOf('Token');
-  var iMemilih = h.indexOf('SudahMemilih');
-  if (iToken < 0 || iMemilih < 0) return { ok: false, error: 'KOLOM_TIDAK_LENGKAP' };
-
-  for (var r = 1; r < data.length; r++) {
-    if (String(data[r][iToken]).trim().toUpperCase() !== token) continue;
-
-    if (data[r][iMemilih] === true || String(data[r][iMemilih]).toUpperCase() === 'TRUE') {
-      return { ok: false, error: 'SUDAH_MEMILIH' };
-    }
-    return {
-      ok: true,
-      baris: r + 1,
-      kolMemilih: iMemilih + 1
-    };
+/** Cek PIN */
+function verifikasiPin(pinInput, jenis) {
+  const pinBenar = jenis === 'cetak' ? PIN_CETAK : PIN_INPUT;
+  if (!pinBenar) {
+    return { valid: false, message: 'PIN belum diisi di kode Apps Script.' };
   }
-  return { ok: false, error: 'TOKEN_TIDAK_DITEMUKAN' };
+  if (String(pinInput).trim() !== String(pinBenar)) {
+    return { valid: false, message: 'PIN salah.' };
+  }
+  return { valid: true };
 }
 
-/** Cek token di PILIH_RW; kalau ada, tambahkan ke sheet Pemilih ini. */
-function tambahDariSumber_(token) {
-  var idSumber = PropertiesService.getScriptProperties().getProperty('SOURCE_SS_ID');
-  if (!idSumber) return false;
+/** Daftarkan satu pemilih baru */
+function daftarkanPemilih(pinInput, nik, nama, noWhatsapp, blok, noBlok, noRumah) {
+  const cekPin = verifikasiPin(pinInput, 'input');
+  if (!cekPin.valid) return { success: false, message: cekPin.message };
 
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) return false;
+  nik = String(nik).trim();
+  nama = String(nama).trim();
+  noWhatsapp = String(noWhatsapp).trim().replace(/[\s-]/g, '');
+  blok = String(blok).trim().toUpperCase();
+  noBlok = String(noBlok).trim();
+  noRumah = String(noRumah).trim();
+
+  if (!/^\d{16}$/.test(nik)) {
+    return { success: false, message: 'NIK harus berupa 16 digit angka.' };
+  }
+  if (!nama) {
+    return { success: false, message: 'Nama tidak boleh kosong.' };
+  }
+  if (!/^\+?\d{9,15}$/.test(noWhatsapp)) {
+    return { success: false, message: 'No WhatsApp tidak valid.' };
+  }
+  if (!/^[A-Z]+$/.test(blok)) {
+    return { success: false, message: 'Blok hanya boleh huruf kapital (A-Z).' };
+  }
+  if (!/^\d+$/.test(noBlok)) {
+    return { success: false, message: 'No Blok hanya boleh angka.' };
+  }
+  if (!noRumah) {
+    return { success: false, message: 'No Rumah tidak boleh kosong.' };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
   try {
-    // mungkin sudah ditambahkan oleh scan lain barusan
-    if (cariDiSheet_(token).error !== 'TOKEN_TIDAK_DITEMUKAN') return true;
-
-    var sumber = SpreadsheetApp.openById(idSumber).getSheetByName('Pemilih');
-    if (!sumber) return false;
-    var sv = sumber.getDataRange().getValues();
-    var iToken = sv[0].map(function (x) { return String(x).trim(); }).indexOf('Token');
-    if (iToken < 0) return false;
-
-    for (var r = 1; r < sv.length; r++) {
-      if (String(sv[r][iToken]).trim().toUpperCase() === token) {
-        getSS_().getSheetByName(CFG.SHEET_PEMILIH).appendRow([token, false]);
-        return true;
-      }
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+    const lastRow = sh.getLastRow();
+    const nikList = lastRow > 1 ? sh.getRange(2, 2, lastRow - 1, 1).getValues().flat().map(String) : [];
+    if (nikList.indexOf(nik) !== -1) {
+      return { success: false, message: 'NIK sudah terdaftar.' };
     }
-    return false;
+    const tokenList = lastRow > 1 ? sh.getRange(2, 4, lastRow - 1, 1).getValues().flat().map(String) : [];
+    let token;
+    do {
+      token = Utilities.getUuid().split('-')[0].toUpperCase();
+    } while (tokenList.indexOf(token) !== -1);
+    const nomorBaru = lastRow;
+    sh.appendRow([nomorBaru, nik, nama, token, false, false, new Date(),
+      noWhatsapp, blok, noRumah, noBlok]);
+    // pastikan NoBlok tersimpan sebagai teks
+    sh.getRange(sh.getLastRow(), 11).setNumberFormat('@').setValue(noBlok);
+    return { success: true, message: 'Berhasil didaftarkan: ' + nama, token: token };
   } finally {
     lock.releaseLock();
   }
 }
 
-function daftarKandidat_() {
-  var sh = getSS_().getSheetByName(CFG.SHEET_KANDIDAT);
-  if (!sh) throw new Error('Sheet Kandidat belum ada. Jalankan setup().');
-  var data = sh.getDataRange().getValues();
-  var out = [];
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === '' || data[i][0] === null) continue;
-    out.push({ no: data[i][0], nama: data[i][1], foto: data[i][2] || '' });
+/** Ubah data satu pemilih (untuk perbaikan typo). Kunci baris = kolom No. */
+function ubahPemilih(pinInput, no, nik, nama, noWhatsapp, blok, noBlok, noRumah) {
+  const cekPin = verifikasiPin(pinInput, 'input');
+  if (!cekPin.valid) return { success: false, message: cekPin.message };
+
+  nik = String(nik).trim();
+  nama = String(nama).trim();
+  noWhatsapp = String(noWhatsapp).trim().replace(/[\s-]/g, '');
+  blok = String(blok).trim().toUpperCase();
+  noBlok = String(noBlok).trim();
+  noRumah = String(noRumah).trim();
+
+  if (!/^\d{16}$/.test(nik)) {
+    return { success: false, message: 'NIK harus berupa 16 digit angka.' };
   }
-  return out;
-}
+  if (!nama) {
+    return { success: false, message: 'Nama tidak boleh kosong.' };
+  }
+  if (!/^\+?\d{9,15}$/.test(noWhatsapp)) {
+    return { success: false, message: 'No WhatsApp tidak valid.' };
+  }
+  if (!/^[A-Z]+$/.test(blok)) {
+    return { success: false, message: 'Blok hanya boleh huruf kapital (A-Z).' };
+  }
+  if (!/^\d+$/.test(noBlok)) {
+    return { success: false, message: 'No Blok hanya boleh angka.' };
+  }
+  if (!noRumah) {
+    return { success: false, message: 'No Rumah tidak boleh kosong.' };
+  }
 
-function buatKodeUnik_(sheetSuara) {
-  var ada = {};
-  var data = sheetSuara.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) ada[String(data[i][0]).toUpperCase()] = true;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { success: false, message: 'Data pemilih kosong.' };
 
-  for (var coba = 0; coba < 50; coba++) {
-    var kode = '';
-    for (var j = 0; j < CFG.PANJANG_KODE; j++) {
-      kode += CFG.ALFABET_KODE.charAt(Math.floor(Math.random() * CFG.ALFABET_KODE.length));
+    const data = sh.getRange(2, 1, lastRow - 1, 2).getValues(); // kolom A (No) & B (NIK)
+    let barisSheet = -1;
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === String(no)) { barisSheet = i + 2; break; }
     }
-    if (!ada[kode]) return kode;
+    if (barisSheet === -1) {
+      return { success: false, message: 'Data dengan No ' + no + ' tidak ditemukan.' };
+    }
+
+    // NIK tidak boleh sama dengan pemilih LAIN
+    for (let i = 0; i < data.length; i++) {
+      if (i + 2 !== barisSheet && String(data[i][1]) === nik) {
+        return { success: false, message: 'NIK sudah dipakai pemilih lain (No ' + data[i][0] + ').' };
+      }
+    }
+
+    sh.getRange(barisSheet, 2).setNumberFormat('@').setValue(nik);          // NIK
+    sh.getRange(barisSheet, 3).setValue(nama);                              // Nama
+    sh.getRange(barisSheet, 8).setNumberFormat('@').setValue(noWhatsapp);   // NoWhatsApp
+    sh.getRange(barisSheet, 9).setValue(blok);                              // Blok
+    sh.getRange(barisSheet, 10).setValue(noRumah);                          // NoRumah
+    sh.getRange(barisSheet, 11).setNumberFormat('@').setValue(noBlok);      // NoBlok
+
+    return { success: true, message: 'Data berhasil diperbarui: ' + nama };
+  } finally {
+    lock.releaseLock();
   }
-  throw new Error('Gagal membuat kode unik');
 }
 
-/** Sisipkan baris di posisi acak (bukan selalu paling bawah). */
-function sisipAcak_(sheet, rowValues) {
-  var last = sheet.getLastRow();            // termasuk header
-  if (last <= 1) {
-    sheet.appendRow(rowValues);
-    return;
-  }
-  var posisi = 2 + Math.floor(Math.random() * last); // 2..last+1
-  if (posisi > last) {
-    sheet.appendRow(rowValues);
-  } else {
-    sheet.insertRowBefore(posisi);
-    sheet.getRange(posisi, 1, 1, rowValues.length).setValues([rowValues]);
-  }
+/** Ambil SEMUA pemilih untuk halaman Daftar */
+function getSemuaPemilih(pinInput, jenisPin) {
+  const cekPin = verifikasiPin(pinInput, jenisPin === 'input' ? 'input' : 'cetak');
+  if (!cekPin.valid) throw new Error(cekPin.message);
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sh.getRange(2, 1, lastRow - 1, 11).getValues();
+  return data.map(row => ({
+    no: row[0],
+    nik: String(row[1]),
+    nama: row[2],
+    sudahDicetak: row[4] === true || row[4] === 'TRUE',
+    noWhatsapp: String(row[7] || ''),
+    blok: String(row[8] || ''),
+    noBlok: String(row[10] || ''),
+    noRumah: String(row[9] || '')
+  }));
 }
 
-function hitungDirekap_() {
-  var data = getSS_().getSheetByName(CFG.SHEET_SUARA).getDataRange().getValues();
-  var n = 0;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][2]).trim().toUpperCase() === 'SUDAH') n++;
-  }
-  return n;
+/** Ambil daftar pemilih yang BELUM dikirim undangannya */
+function getDaftarBelumDicetak(pinInput) {
+  const cekPin = verifikasiPin(pinInput, 'cetak');
+  if (!cekPin.valid) throw new Error(cekPin.message);
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sh.getRange(2, 1, lastRow - 1, 11).getValues();
+  return data
+    .filter(row => row[4] !== true && row[4] !== 'TRUE')
+    .map(row => ({
+      no: row[0],
+      nik: String(row[1]),
+      nama: row[2],
+      token: row[3],
+      noWhatsapp: String(row[7] || ''),
+      blok: row[8] || '',
+      noBlok: String(row[10] || ''),
+      noRumah: row[9] || ''
+    }));
 }
 
-function cekPin_(pin) {
-  var simpan = PropertiesService.getScriptProperties().getProperty('PIN_PANITIA');
-  return !!simpan && String(pin || '') === simpan;
+/** Ambil daftar pemilih yang SUDAH dikirim undangannya */
+function getDaftarSudahDicetak(pinInput) {
+  const cekPin = verifikasiPin(pinInput, 'cetak');
+  if (!cekPin.valid) throw new Error(cekPin.message);
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sh.getRange(2, 1, lastRow - 1, 11).getValues();
+  return data
+    .filter(row => row[4] === true || row[4] === 'TRUE')
+    .map(row => ({
+      no: row[0],
+      nik: String(row[1]),
+      nama: row[2],
+      token: row[3],
+      sudahDicetak: true,
+      noWhatsapp: String(row[7] || ''),
+      blok: row[8] || '',
+      noBlok: String(row[10] || ''),
+      noRumah: row[9] || ''
+    }));
 }
 
-/** Pastikan kolom-kolom ada di sheet; jika belum, tambahkan di kolom paling kanan. */
-function kolom_(sheet, namaList) {
-  var lastCol = sheet.getLastColumn();
-  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (x) { return String(x).trim(); });
-  namaList.forEach(function (nama) {
-    if (header.indexOf(nama) < 0) {
-      lastCol++;
-      sheet.getRange(1, lastCol).setValue(nama);
-      header.push(nama);
+/** Cari pemilih berdasarkan NIK atau nama */
+function cariPemilih(pinInput, keyword) {
+  const cekPin = verifikasiPin(pinInput, 'cetak');
+  if (!cekPin.valid) throw new Error(cekPin.message);
+
+  keyword = String(keyword).trim().toLowerCase();
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sh.getRange(2, 1, lastRow - 1, 11).getValues();
+  return data
+    .filter(row => String(row[1]).includes(keyword) ||
+      String(row[2]).toLowerCase().includes(keyword))
+    .map(row => ({
+      no: row[0],
+      nik: String(row[1]),
+      nama: row[2],
+      token: row[3],
+      sudahDicetak: row[4] === true || row[4] === 'TRUE',
+      noWhatsapp: String(row[7] || ''),
+      blok: row[8] || '',
+      noBlok: String(row[10] || ''),
+      noRumah: row[9] || ''
+    }));
+}
+
+/** Tandai status "SudahDicetak" menjadi true */
+function tandaiSudahDicetak(pinInput, nikList) {
+  const cekPin = verifikasiPin(pinInput, 'cetak');
+  if (!cekPin.valid) return { success: false, message: cekPin.message };
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { success: true };
+
+  const data = sh.getRange(2, 2, lastRow - 1, 1).getValues();
+  const nikSet = new Set(nikList.map(String));
+  const updates = [];
+
+  data.forEach((row, idx) => {
+    if (nikSet.has(String(row[0]))) {
+      updates.push(idx + 2);
     }
   });
+
+  updates.forEach(rowNum => sh.getRange(rowNum, 5).setValue(true));
+  return { success: true, jumlahDitandai: updates.length };
 }
 
-// ======================= 5. AMBIL SUARA UNTUK HITUNG =================
-// Hanya kode acak + nomor kandidat. Tanpa token, tanpa waktu, tanpa identitas.
-function ambilSuara_(pin) {
-  if (!cekPin_(pin)) return { ok: false, error: 'PIN_SALAH' };
+// =================================================================
+// FUNGSI BUAT PDF & SIMPAN KE DRIVE UNTUK WA
+// =================================================================
 
-  var ss = getSS_();
-  var sua = ss.getSheetByName(CFG.SHEET_SUARA).getDataRange().getValues();
-  var suara = [];
-  for (var i = 1; i < sua.length; i++) {
-    var kode = String(sua[i][0]).trim();
-    if (!kode) continue;
-    suara.push({ kode: kode, no: sua[i][1] });
+/**
+ * Dipanggil saat tombol "Kirim WA" diklik
+ */
+function kirimUndanganPdfPerWarga(pinInput, nik) {
+  const cekPin = verifikasiPin(pinInput, 'cetak');
+  if (!cekPin.valid) return { success: false, message: cekPin.message };
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PEMILIH);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { success: false, message: 'Data pemilih kosong.' };
+
+  const data = sh.getRange(2, 1, lastRow - 1, 11).getValues();
+  const barisWarga = data.find(row => String(row[1]) === String(nik));
+
+  if (!barisWarga) {
+    return { success: false, message: 'Data warga tidak ditemukan.' };
   }
 
-  var pv = ss.getSheetByName(CFG.SHEET_PEMILIH).getDataRange().getValues();
-  var h = pv[0].map(function (x) { return String(x).trim(); });
-  var iToken = h.indexOf('Token'), iMemilih = h.indexOf('SudahMemilih');
-  var sudahMemilih = 0;
-  for (var r = 1; r < pv.length; r++) {
-    if (!pv[r][iToken]) continue;
-    if (iMemilih >= 0 && pv[r][iMemilih] === true) sudahMemilih++;
-  }
+  const warga = {
+    noDpt: barisWarga[0],
+    nik: String(barisWarga[1]),
+    nama: barisWarga[2],
+    token: barisWarga[3],
+    noWhatsapp: String(barisWarga[7] || ''),
+    blok: barisWarga[8] || '',
+    noBlok: String(barisWarga[10] || ''),
+    noRumah: barisWarga[9] || ''
+  };
 
-  return { ok: true, kandidat: daftarKandidat_(), suara: suara, sudahMemilih: sudahMemilih };
+  try {
+    // 1. Buat PDF & Simpan ke Drive
+    const urlPdf = buatFilePdfSatuWarga_(warga);
+
+    // 2. (Penandaan "sudah dikirim" dilakukan saat tombol Buka WhatsApp diklik,
+    //     lewat fungsi tandaiSudahDicetak dari halaman Cetak)
+
+    // 3. Kirim balik hasilnya ke Web App
+    return {
+      success: true,
+      message: 'PDF berhasil disimpan ke Drive!',
+      pdfUrl: urlPdf,
+      noWa: warga.noWhatsapp,
+      nama: warga.nama
+    };
+  } catch (e) {
+    return { success: false, message: 'Gagal membuat PDF: ' + e.toString() };
+  }
 }
+
+/**
+ * Generasi PDF dari Google Docs Template dengan QR Code Token
+ */
+function buatFilePdfSatuWarga_(warga) {
+  const folder = DriveApp.getFolderById(FOLDER_UNDANGAN_ID);
+  const template = DriveApp.getFileById(TEMPLATE_DOC_ID);
+
+  const namaFile = `Undangan_${warga.nama}_DPT${warga.noDpt}`;
+  const salinanDoc = template.makeCopy(namaFile, folder);
+  const doc = DocumentApp.openById(salinanDoc.getId());
+  const body = doc.getBody();
+
+  // Contoh hasil: Blok C, No Blok 5, No Rumah 12 -> "C5/12"
+  const alamat = warga.blok + warga.noBlok + '/' + warga.noRumah;
+
+  // 1. Mengisi text placeholder biasa
+  body.replaceText('{{NAMA}}', warga.nama);
+  body.replaceText('{{NO_DPT}}', String(warga.noDpt));
+  body.replaceText('{{BLOK}}', alamat);
+
+  // 2. Generate gambar QR Code dari Nilai TOKEN Warga
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=1&data=${encodeURIComponent(warga.token)}`;
+  const qrBlob = UrlFetchApp.fetch(qrUrl).getBlob();
+
+  // 3. Cari placeholder {{BARCODE}} atau {{QR_CODE}} di Google Docs dan ganti dengan Gambar QR
+  const placeholder = body.findText('{{BARCODE}}') || body.findText('{{QR_CODE}}');
+  if (placeholder) {
+    const el = placeholder.getElement();
+    const parent = el.getParent();
+
+    // Sisipkan gambar QR Code tepat di posisi placeholder
+    if (parent.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const img = parent.asParagraph().appendInlineImage(qrBlob);
+      img.setWidth(120);
+      img.setHeight(120);
+      el.deleteText(0, el.getText().length - 1); // Hapus teks placeholder
+    }
+  }
+
+  doc.saveAndClose();
+
+  // 4. Ubah Dokumen ke PDF
+  const pdfBlob = salinanDoc.getAs('application/pdf');
+  pdfBlob.setName(`${namaFile}.pdf`);
+  const filePdf = folder.createFile(pdfBlob);
+
+  // 5. Bersihkan file sementara & atur akses link PDF
+  salinanDoc.setTrashed(true);
+  filePdf.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  return filePdf.getUrl();
+}
+
